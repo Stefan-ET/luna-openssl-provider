@@ -11,11 +11,11 @@ RUN \
 RUN \
     # Create user and group
     groupadd -g 501 app && \
-    useradd -u 1000 -g app -G app -s /bin/bash bob
+    useradd -u 1000 -g app -G app -s /bin/bash luna
 
-# Switch to bob user: if execution required to be root, then it should be stated manually, at container run time
-USER bob
-WORKDIR /home/bob
+# Switch to luna user: if execution required to be root, then it should be stated manually, at container run time
+USER luna
+WORKDIR /home/luna/luna-openssl-provider
 
 ENTRYPOINT []
 CMD ["/bin/bash", "-l"]
