@@ -1,0 +1,14 @@
+*.so
+*.o
+openssl-build/
+openssl-source/
+package/
+builds/
+logs/
+SA64.env
+SA64client.env
+config.in
+engine/makefile
+gem-samples/engineperf/engineperf
+gem-samples/sautil/sautil
+lunaProvider/makefile
