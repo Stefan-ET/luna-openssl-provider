@@ -22,15 +22,20 @@ function download_deps() {
 }
 
 function build_image() {
-    docker build -t $DOCKER_IMG .
+	docker build -t $DOCKER_IMG .
 }
 
 function build_luna() {
-		$DOCKER_RUNNER ./build.sh SA64client clean all
-		$DOCKER_RUNNER ./build.sh SA64client build depends
-		$DOCKER_RUNNER ./build.sh SA64client build all
+	$DOCKER_RUNNER ./build.sh SA64client clean all
+	$DOCKER_RUNNER ./build.sh SA64client build depends
+	$DOCKER_RUNNER ./build.sh SA64client build all
+}
+
+function pack_tarball() {
+	tar -czf luna.tar.gz -C $(dirname $0) builds
 }
 
 download_deps
 build_image
 build_luna
+pack_tarball
