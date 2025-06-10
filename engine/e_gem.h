@@ -747,6 +747,30 @@ typedef CK_RV CK_ENTRY(CK_PTR CK_CA_DeriveKeyAndWrap)(
    CK_ULONG_PTR      pulWrappedKeyLen   /* gets wrapped key size */
 );
 
+#define CKA_PARAMETER_SET               0x0000061dUL
+#define CKA_ENCAPSULATE                 0x00000633UL
+#define CKA_DECAPSULATE                 0x00000634UL
+
+typedef CK_RV CK_ENTRY(CK_PTR CK_CA_EncapsulateKey)(
+    CK_SESSION_HANDLE hSession,
+    CK_MECHANISM_PTR     pMechanism,
+    CK_OBJECT_HANDLE     hPublicKey,
+    CK_ATTRIBUTE_PTR     pTemplate,
+    CK_ULONG             ulAttributeCount,
+    CK_BYTE_PTR          pCiphertext,
+    CK_ULONG_PTR         pulCiphertextLen,
+    CK_OBJECT_HANDLE_PTR phKey);
+
+typedef CK_RV CK_ENTRY(CK_PTR CK_CA_DecapsulateKey)(
+    CK_SESSION_HANDLE    hSession,
+    CK_MECHANISM_PTR     pMechanism,
+    CK_OBJECT_HANDLE     hPrivateKey,
+    CK_ATTRIBUTE_PTR     pTemplate,
+    CK_ULONG             ulAttributeCount,
+    CK_BYTE_PTR          pCiphertextKey,
+    CK_ULONG             ulCiphertextLen,
+    CK_OBJECT_HANDLE_PTR phKey);
+
 /*****************************************************************************/
 
 /* P11 data structures are packed on Windows platform only. */

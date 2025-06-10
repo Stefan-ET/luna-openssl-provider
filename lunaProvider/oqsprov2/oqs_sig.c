@@ -476,9 +476,22 @@ static int oqs_sig_sign(void *vpoqs_sigctx, unsigned char *sig, size_t *siglen,
                                   ->length_signature;
                 buf = OPENSSL_malloc(oqs_sig_len);
                 if (LUNA_OQS_QUERY_SIG_sign(oqsxkey->lunakeyctx) == LUNA_OQS_OK) {
+                    LUNA_PRINTF(("oqs_sig_len = %ld (in)\n", oqs_sig_len));
                     rctmp = LUNA_OQS_SIG_sign_ndx(oqsxkey->lunakeyctx, buf, &oqs_sig_len, final_tbs, final_tbslen, i);
+                    LUNA_PRINTF(("oqs_sig_len = %ld (out)\n", oqs_sig_len));
                 } else {
-                    rctmp = OQS_SIG_sign(oqs_key, buf, &oqs_sig_len, final_tbs, final_tbslen, oqsxkey->comp_privkey[i]);
+#if 0
+                    // function 'with_ctx_str' implies liboqs 0.12.0 (required for mldsa)
+                    rctmp = OQS_SIG_sign_with_ctx_str(oqs_key, buf, &oqs_sig_len,
+                            final_tbs, final_tbslen,
+                            NULL, 0,
+                            oqsxkey->comp_privkey[i]);
+#else
+                    // lack of function 'with_ctx_str' implies liboqs 0.10.0
+                    rctmp = OQS_SIG_sign(oqs_key, buf, &oqs_sig_len,
+                            final_tbs, final_tbslen,
+                            oqsxkey->comp_privkey[i]);
+#endif
                 }
                 if (rctmp != OQS_SUCCESS) {
                     ERR_raise(ERR_LIB_USER, OQSPROV_R_SIGNING_FAILED);
@@ -620,13 +633,25 @@ static int oqs_sig_sign(void *vpoqs_sigctx, unsigned char *sig, size_t *siglen,
 
     } else {
         int rctmp = 0;
-        OQS_SIG_PRINTF2("OQS SIG provider: oqs_sig_len = %ld (before)\n", oqs_sig_len);
-        oqs_sig_len = *siglen - index; /* TODO: unsure why luna requires this line but liboqs does not! */
-        OQS_SIG_PRINTF2("OQS SIG provider: oqs_sig_len = %ld (after)\n", oqs_sig_len);
         if (LUNA_OQS_QUERY_SIG_sign(oqsxkey->lunakeyctx) == LUNA_OQS_OK) {
+            LUNA_PRINTF(("oqs_sig_len = %ld (in)\n", oqs_sig_len));
+            oqs_sig_len = *siglen - index;
+            LUNA_PRINTF(("oqs_sig_len = %ld (edit)\n", oqs_sig_len));
             rctmp = LUNA_OQS_SIG_sign_ndx(oqsxkey->lunakeyctx, sig + index, &oqs_sig_len, tbs, tbslen, -1);
+            LUNA_PRINTF(("oqs_sig_len = %ld (out)\n", oqs_sig_len));
         } else {
-            rctmp = OQS_SIG_sign(oqs_key, sig + index, &oqs_sig_len, tbs, tbslen, oqsxkey->comp_privkey[oqsxkey->numkeys-1]);
+#if 0
+            // function 'with_ctx_str' implies liboqs 0.12.0 (required for mldsa)
+            rctmp = OQS_SIG_sign_with_ctx_str(oqs_key, sig + index, &oqs_sig_len,
+                    tbs, tbslen,
+                    NULL, 0,
+                    oqsxkey->comp_privkey[oqsxkey->numkeys-1]);
+#else
+            // lack of function 'with_ctx_str' implies liboqs 0.10.0 (required for mldsa)
+            rctmp = OQS_SIG_sign(oqs_key, sig + index, &oqs_sig_len,
+                    tbs, tbslen,
+                    oqsxkey->comp_privkey[oqsxkey->numkeys-1]);
+#endif
         }
         if (rctmp != OQS_SUCCESS) {
             ERR_raise(ERR_LIB_USER, OQSPROV_R_SIGNING_FAILED);

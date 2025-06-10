@@ -524,7 +524,7 @@ static int set_property_query(OQSX_KEY *oqsxkey, const char *propq)
     return 1;
 }
 
-static int oqsx_set_params(void *key, const OSSL_PARAM params[])
+static int oqsx_set_params_internal(void *key, const OSSL_PARAM params[])
 {
     OQSX_KEY *oqsxkey = key;
     const OSSL_PARAM *p;
@@ -567,6 +567,16 @@ static int oqsx_set_params(void *key, const OSSL_PARAM params[])
 
     // not passing in params to set is no error, just a no-op
     return 1;
+}
+
+static int oqsx_set_params(void *key, const OSSL_PARAM params[])
+{
+    int rc;
+    OQSX_KEY *oqsxkey = (OQSX_KEY *)key;
+    LUNA_OQS_WRITEKEY_LOCK(oqsxkey->lunakeyctx, LUNA_PROV_KEY_REASON_SET_PARAMS);
+    rc = oqsx_set_params_internal(key, params);
+    LUNA_OQS_WRITEKEY_UNLOCK(oqsxkey->lunakeyctx);
+    return rc;
 }
 
 static const OSSL_PARAM oqs_settable_params[]

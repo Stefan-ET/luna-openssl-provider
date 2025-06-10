@@ -14,8 +14,6 @@ LIBRARY "lunaprov_deps"
 EXPORTS
   ossl_prov_is_running
   ossl_rsa_digestinfo_encoding
-  ossl_rsa_check_key
-  ossl_ec_check_key
   ossl_dsa_check_key
 
   ossl_rsa_to_PKCS1_der_encoder_functions
@@ -283,10 +281,8 @@ EXPORTS
   ossl_blob_length
   ossl_do_PVK_header
 
-  ossl_digest_get_approved_nid_with_sha1
   ossl_digest_rsa_sign_get_md_nid
 
-  ossl_digest_is_allowed
   ossl_ecdh_kdf_X9_63
   
   ossl_type_specific_no_pub_der_to_sm2_decoder_functions
@@ -313,3 +309,15 @@ EXPORTS
   ossl_evp_pkey_get1_ED25519
   ossl_evp_pkey_get1_ED448
   ossl_ecx_dhkem_derive_private
+
+; removed since 3.4.1
+;  ossl_digest_get_approved_nid_with_sha1
+;  ossl_digest_is_allowed
+;  ossl_ec_check_key
+;  ossl_rsa_check_key
+
+; added since 3.4.1
+ossl_rsa_check_key_size
+ossl_ec_check_security_strength
+ossl_digest_get_approved_nid
+

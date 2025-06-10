@@ -54,6 +54,7 @@ static void luna_init_ecdh(void);
 /* NOTE: OQS is conditionally compiled, on windows for example */
 #ifdef LUNA_OQS
 static void luna_init_pqc(void);
+static void luna_fini_pqc(void);
 #endif
 
 /* engine interface that is private to luna provider */
@@ -93,6 +94,9 @@ void luna_prov_engine_fini(void)
     /* NOTE: maybe not safe to call upon application exit (atexit) */
     if (luna_get_flag_exit() != 0)
         return;
+#ifdef LUNA_OQS
+    luna_fini_pqc();
+#endif
     luna_finish_engine(e_init);
     luna_destroy_engine(e_init);
     e_init = NULL;
@@ -222,7 +226,8 @@ int luna_prov_RSA_generate_multi_prime_key(RSA *rsa, int bits, int primes, BIGNU
     LUNA_PRINTF(("bits = %d, primes = %d\n", bits, primes));
     if (primes != 2)
         return 0;
-    return luna_rsa_keygen(rsa, bits, e, cb);
+    int flagSessionObject = luna_get_token_object() ? 0 : 1;
+    return luna_rsa_keygen_ex(rsa, bits, e, cb, flagSessionObject);
 }
 
 static int luna_prov_encode_pkcs1(unsigned char **out, size_t *out_len, int type,
@@ -444,8 +449,17 @@ int luna_prov_EC_KEY_generate_key_ex(EC_KEY *key, int lunaflags)
         return EC_KEY_generate_key(key);
     }
     /* keygen in hardware */
-    const int flagSessionObject = (lunaflags & LUNA_PROV_FLAGS_SESSION_OBJECT ? 1 : 0);
-    const int flagDerive = 1; /* FIXME:SW: sometimes 0 ? */
+    int flagSessionObject;
+    int flagDerive;
+    /* first, check for override (CKA_TOKEN) */
+    if (lunaflags & LUNA_PROV_FLAGS_SESSION_OBJECT) {
+        flagSessionObject = 1;
+        flagDerive = 1;
+    } else {
+        /* second, check for config (CKA_TOKEN) */
+        flagSessionObject = luna_get_token_object() ? 0 : 1;
+        flagDerive = 0;
+    }
     return luna_ec_keygen_hw_ex(key, flagSessionObject, flagDerive);
 }
 
@@ -471,7 +485,8 @@ int luna_prov_DSA_generate_key(DSA *dsa)
     /* for keygen, the engine does not redirect to software so we must redirect here */
     if ( ! luna_get_enable_dsa_gen_key_pair() )
         return DSA_generate_key(dsa);
-    return luna_dsa_keygen(dsa);
+    int flagSessionObject = luna_get_token_object() ? 0 : 1;
+    return luna_dsa_keygen_ex(dsa, flagSessionObject);
 }
 
 int luna_prov_ossl_dsa_sign_int(int type, const unsigned char *dgst, int dlen,
@@ -1006,11 +1021,64 @@ static void luna_init_algorithm_table(const char *szInclude, const char *szExclu
     }
 }
 
+#ifdef OQS_USE_OPENSSL
+extern void OQS_randombytes_openssl(uint8_t *out, size_t outlen);
+#endif
+extern void OQS_randombytes_system(uint8_t *out, size_t outlen);
+
+// do PQC RNG in liboqs
+static void luna_pqc_rng_liboqs(uint8_t *out, size_t outlen) {
+#ifdef OQS_USE_OPENSSL
+    // TODO: OQS_randombytes_openssl(out, outlen);
+    OQS_randombytes_system(out, outlen);
+#else
+    OQS_randombytes_system(out, outlen);
+#endif
+}
+
+static int luna_pqc_rng_hw_is_error(void);
+static CK_RV luna_pqc_rng_hw(uint8_t *out, size_t outlen);
+static void luna_pqc_rng_hw_cleanse(void);
+
+// do PQC RNG in provider
+static void luna_pqc_rng(uint8_t *out, size_t outlen) {
+    // avoid repeated RNG failures in hardware
+    if ( luna_pqc_rng_hw_is_error() || (luna_pqc_rng_hw(out, outlen) != CKR_OK) ) {
+        // fallback to software
+        luna_pqc_rng_liboqs(out, outlen);
+    }
+}
+
+static int luna_pqc_rng_active = 0;
+static lunasys_mutex_t luna_pqc_rng_mu;
+
 static void luna_init_pqc(void) {
     // populate algorithm table
     luna_init_algorithm_table(
         (g_config.IncludePqc != NULL ? g_config.IncludePqc : "ALL"),
         (g_config.ExcludePqc != NULL ? g_config.ExcludePqc : "NONE") );
+    // hook PQC RNG
+    LUNA_ASSERT(lunasys_mutex_init(&luna_pqc_rng_mu) == 0);
+    if (luna_get_DelegateSwPqcKemEncapRngToHw()) {
+        OQS_randombytes_custom_algorithm(luna_pqc_rng);
+        luna_pqc_rng_active = 1;
+    }
+}
+
+// undo actions of luna_init_pqc
+static void luna_fini_pqc(void) {
+    LUNA_PRINTF(("\n"));
+    // unhook PQC RNG
+    if (luna_pqc_rng_active) {
+#ifdef OQS_USE_OPENSSL
+        // TODO: LUNA_ASSERT(OQS_randombytes_switch_algorithm(OQS_RAND_alg_openssl) == OQS_SUCCESS);
+        LUNA_ASSERT(OQS_randombytes_switch_algorithm(OQS_RAND_alg_system) == OQS_SUCCESS);
+#else
+        LUNA_ASSERT(OQS_randombytes_switch_algorithm(OQS_RAND_alg_system) == OQS_SUCCESS);
+#endif
+        lunasys_mutex_fini(&luna_pqc_rng_mu);
+        luna_pqc_rng_active = 0;
+    }
 }
 
 static CK_RV LunaLookupAlgName_range(const char *alg_name, unsigned index0, unsigned index1, unsigned *pindexFound,
@@ -1295,32 +1363,33 @@ int LUNA_OQS_QUERY_KEM_keypair(luna_prov_key_ctx *keyctx) {
     return LUNA_OQS_QUERY_any_keypair(keyctx);
 }
 
-static int _LUNA_OQS_findobject(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyinfo);
+static int _LUNA_OQS_findobject_helper_pre(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *keyinfo,
+        int *bFoundItHere);
+static void _LUNA_OQS_findobject_helper_post(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *keyinfo,
+        int bFoundItHere);
 
 // decode and find the key in hsm
 // FIXME: some callers only need to decode the key (optimization)
 static int LUNA_OQS_findobject(luna_prov_key_ctx *keyctx) {
     int rc = 0;
+    int bFoundItHere = 0;
     luna_prov_keyinfo keyinfo;
     LUNA_OQS_READKEY_LOCK(keyctx, &keyinfo);
-    rc = _LUNA_OQS_findobject(keyctx, &keyinfo);
+    rc = _LUNA_OQS_findobject_helper_pre(keyctx, &keyinfo, &bFoundItHere);
+    if (rc) {
+        _LUNA_OQS_findobject_helper_post(keyctx, &keyinfo, bFoundItHere);
+    }
     LUNA_OQS_READKEY_UNLOCK(keyctx, &keyinfo);
     return rc;
 }
 
+// query if public key exists as a blob (outside the hsm)
 static int luna_prov_key_reason_pubkey(luna_prov_key_reason reason) {
     int rc = ( (reason == LUNA_PROV_KEY_REASON_SET_PARAMS) || /* confirmed */
          (reason == LUNA_PROV_KEY_REASON_FROM_DATA) || /* TODO: unconfirmed */
-#if 1
-         /* FIXME: the provider is failing to call LUNA_OQS_WRITEKEY_LOCK
-          * that updates the 'reason' field.
-          *
-          * So, one side-effect of this extra check is that key derivation will
-          * always use an external software public key rather than an hsm
-          * public key... which is ok... assuming the correct key was intended.
+         /* NOTE: the provider calls LUNA_OQS_WRITEKEY_LOCK that updates the 'reason' field,
+          * so it is no longer necessary to check for reason == LUNA_PROV_KEY_REASON_GEN.
           */
-         (reason == LUNA_PROV_KEY_REASON_GEN) ||
-#endif
          (reason == LUNA_PROV_KEY_REASON_FROM_ENCODING) ); /* confirmed */
     return rc;
 }
@@ -1394,6 +1463,11 @@ static void luna_sprintf_base64url(char *obuf, unsigned char *in, unsigned inlen
 static void _LUNA_debug_ex(const char *prefix, const char *prefix2, const CK_BYTE* p, size_t n);
 static int luna_prov_is_ecdh_len(size_t len);
 
+static void LunaTranslateFM2FW(luna_prov_key_ctx *keyctx,
+    CK_KEY_TYPE *pkeytype, CK_KEY_PARAMS *pparams,
+    CK_MECHANISM *ptypeGenerate,
+    CK_MECHANISM *ptypeSign, CK_MECHANISM *ptypeEncap, CK_MECHANISM *ptypeDecap);
+
 #include "lunaPqcKem.c"
 
 /* luna oqs callback functions */
@@ -1446,8 +1520,10 @@ int LUNA_OQS_KEM_keypair(luna_prov_key_ctx *keyctx, luna_prov_key_bits *keybits)
     return LUNA_OQS_keypair(keyctx, keybits);
 }
 
+static int _LUNA_OQS_findobject_internal(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *keyinfo);
+
 // decode and find the key in hsm, for ops such as sign, verify, encaps, decaps
-static int _LUNA_OQS_findobject_helper(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *keyinfo,
+static int _LUNA_OQS_findobject_helper_pre(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *keyinfo,
         int *bFoundItHere) {
     int rc = 1;
     if ( (keyctx->magic == LUNA_PROV_MAGIC_ZERO)
@@ -1455,7 +1531,7 @@ static int _LUNA_OQS_findobject_helper(luna_prov_key_ctx *keyctx, luna_prov_keyi
         *bFoundItHere = (keyctx->magic == LUNA_PROV_MAGIC_ZERO) ? 1 : 0;
         // force another find object
         keyctx->magic = LUNA_PROV_MAGIC_ZERO;
-        (void)_LUNA_OQS_findobject(keyctx, keyinfo);
+        (void)_LUNA_OQS_findobject_internal(keyctx, keyinfo);
     }
     if (keyctx->magic != LUNA_PROV_MAGIC_OK) {
         rc = 0;
@@ -1477,12 +1553,16 @@ int LUNA_OQS_KEM_encaps(luna_prov_key_ctx *keyctx,
 
     luna_prov_keyinfo keyinfo;
     LUNA_OQS_READKEY_LOCK(keyctx, &keyinfo);
-    if (!_LUNA_OQS_findobject_helper(keyctx, &keyinfo, &bFoundItHere)) {
+    if (!_LUNA_OQS_findobject_helper_pre(keyctx, &keyinfo, &bFoundItHere)) {
         LUNA_OQS_READKEY_UNLOCK(keyctx, &keyinfo);
         return LUNA_OQS_ERROR; // callback failure (bad key state)
     }
 
     CK_RV rv = (luna_open_context(&keyinfo.sess) == 1) ? CKR_OK : CKR_GENERAL_ERROR;
+    // NOTE: KEM_encaps implies that the public key bytes were previously copied from peer, so
+    // calling _LUNA_OQS_findobject_helper_post here to populate public key bytes from hardware
+    // would be a major mistake. We assert this fact, unlike the other ops (KEM_decaps, SIG_sign, SIG_verify).
+    LUNA_ASSERT(bFoundItHere == 0);
     if (out == NULL || secret == NULL) {
         // query length only
         dlen = *outlen;
@@ -1507,7 +1587,7 @@ int LUNA_OQS_KEM_encaps(luna_prov_key_ctx *keyctx,
     LUNA_PRINTF(("rv2 = 0x%lx\n", rv));
     if (rv == CKR_OK) { // best to not side-effect size on error
         memcpy(out, pd, dlen);
-        free(pd);
+        OPENSSL_free(pd);
         *outlen = dlen;
         *secretlen = length_shared_secret;
     }
@@ -1532,17 +1612,14 @@ int LUNA_OQS_KEM_decaps(luna_prov_key_ctx *keyctx,
     LUNA_PRINTF(("alg_name = %s, magic = 0x%X\n", keyctx->alg_name, keyctx->magic));
     luna_prov_keyinfo keyinfo;
     LUNA_OQS_READKEY_LOCK(keyctx, &keyinfo);
-    if (!_LUNA_OQS_findobject_helper(keyctx, &keyinfo, &bFoundItHere)) {
+    if (!_LUNA_OQS_findobject_helper_pre(keyctx, &keyinfo, &bFoundItHere)) {
         LUNA_OQS_READKEY_UNLOCK(keyctx, &keyinfo);
         return LUNA_OQS_ERROR; // callback failure (bad key state)
     }
 
     CK_RV rv = (luna_open_context(&keyinfo.sess) == 1) ? CKR_OK : CKR_GENERAL_ERROR;
     if (rv == CKR_OK && bFoundItHere) {
-        /* NOTE: populate the public key bytes in case of verify in software (x25519/x448) */
-        if (keyctx->ctxtype == LUNA_PROV_CTXTYPE_ECXEXCH) {
-            (void)LunaEcxExportPublic(keyctx, &keyinfo);
-        }
+        _LUNA_OQS_findobject_helper_post(keyctx, &keyinfo, bFoundItHere);
     }
     if (length_shared_secret > *outlen)
         rv = CKR_GENERAL_ERROR; // callback failure (buffer too small)
@@ -1565,7 +1642,7 @@ int LUNA_OQS_SIG_keypair(luna_prov_key_ctx *keyctx, luna_prov_key_bits *keybits)
     return LUNA_OQS_keypair(keyctx, keybits);
 }
 
-static int _LUNA_OQS_findobject(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyinfo)
+static int _LUNA_OQS_findobject_internal(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyinfo)
 {
     // check keyctx already initialized
     if (keyctx->magic != LUNA_PROV_MAGIC_ZERO)
@@ -1599,7 +1676,7 @@ int LUNA_OQS_SIG_sign_ndx(luna_prov_key_ctx *keyctx,
     LUNA_PRINTF(("alg_name = %s, magic = 0x%X\n", keyctx->alg_name, keyctx->magic));
     luna_prov_keyinfo keyinfo;
     LUNA_OQS_READKEY_NDX_LOCK(keyctx, &keyinfo, ndx_in);
-    if (!_LUNA_OQS_findobject_helper(keyctx, &keyinfo, &bFoundItHere)) {
+    if (!_LUNA_OQS_findobject_helper_pre(keyctx, &keyinfo, &bFoundItHere)) {
         LUNA_OQS_READKEY_UNLOCK(keyctx, &keyinfo);
         return LUNA_OQS_ERROR; // callback failure (bad key state)
     }
@@ -1607,10 +1684,7 @@ int LUNA_OQS_SIG_sign_ndx(luna_prov_key_ctx *keyctx,
     CK_ULONG dlen = 0;
     CK_RV rv = (luna_open_context(&keyinfo.sess) == 1) ? CKR_OK : CKR_GENERAL_ERROR;
     if (rv == CKR_OK && bFoundItHere) {
-        /* NOTE: populate the public key bytes in case of verify in software (EDDSA) */
-        if (keyctx->ctxtype == LUNA_PROV_CTXTYPE_EDDSA) {
-            (void)LunaEcxExportPublic(keyctx, &keyinfo);
-        }
+        _LUNA_OQS_findobject_helper_post(keyctx, &keyinfo, bFoundItHere);
     }
     if (sig == NULL) {
         // query length only
@@ -1647,17 +1721,14 @@ int LUNA_OQS_SIG_verify_ndx(luna_prov_key_ctx *keyctx,
     LUNA_PRINTF(("alg_name = %s, magic = 0x%X\n", keyctx->alg_name, keyctx->magic));
     luna_prov_keyinfo keyinfo;
     LUNA_OQS_READKEY_NDX_LOCK(keyctx, &keyinfo, ndx_in);
-    if (!_LUNA_OQS_findobject_helper(keyctx, &keyinfo, &bFoundItHere)) {
+    if (!_LUNA_OQS_findobject_helper_pre(keyctx, &keyinfo, &bFoundItHere)) {
         LUNA_OQS_READKEY_UNLOCK(keyctx, &keyinfo);
         return LUNA_OQS_ERROR; // callback failure (bad key state)
     }
 
     CK_RV rv = (luna_open_context(&keyinfo.sess) == 1) ? CKR_OK : CKR_GENERAL_ERROR;
     if (rv == CKR_OK && bFoundItHere) {
-        /* NOTE: populate the public key bytes in case of verify in software (EDDSA) */
-        if (keyctx->ctxtype == LUNA_PROV_CTXTYPE_EDDSA) {
-            (void)LunaEcxExportPublic(keyctx, &keyinfo);
-        }
+        _LUNA_OQS_findobject_helper_post(keyctx, &keyinfo, bFoundItHere);
     }
     if (rv == CKR_OK)
         rv = LunaPqcSigVerify(keyctx, &keyinfo, tbs, tbslen, sig, siglen);
@@ -2643,7 +2714,7 @@ static CK_RV LunaUnwrapKeyBytesOAEP(luna_prov_key_ctx *keyctx, luna_prov_keyinfo
         params->pSourceData = 0;
         params->ulSourceDataLen = 0;
         ulWrapped = (bits / 8);
-        pWrapped = (CK_BYTE*)malloc(ulWrapped);
+        pWrapped = (CK_BYTE*)OPENSSL_malloc(ulWrapped);
         if (px == NULL) {
             rv = P11->C_WrapKey(session, &mechWrap, hWrapper, hObject, pWrapped, &ulWrapped);
         } else {
@@ -2719,7 +2790,7 @@ static CK_RV LunaUnwrapKeyBytesOAEP(luna_prov_key_ctx *keyctx, luna_prov_keyinfo
     // clean
     if (pWrapped != NULL) {
         memset(pWrapped, 0, ulWrapped);
-        free(pWrapped);
+        OPENSSL_free(pWrapped);
     }
     luna_context_set_last_error(&pkeyinfo->sess, rv);
     return rv;
@@ -3334,4 +3405,240 @@ void luna_getenv_LUNAPROV_init(void) {
         }
     }
 }
+
+#ifdef LUNA_OQS
+
+// translate from FM codes to FW codes (main firmware)
+static void LunaTranslateFM2FW(luna_prov_key_ctx *keyctx, CK_KEY_TYPE *pkeytype,
+        CK_KEY_PARAMS *pparams, CK_MECHANISM *ptypeGenerate,
+        CK_MECHANISM *ptypeSign, CK_MECHANISM *ptypeEncap,
+        CK_MECHANISM *ptypeDecap) {
+
+    int isMechMlkem = 0;
+    int isMechMldsa = 0;
+
+    LUNA_PRINTF(("alg_name = %s\n", keyctx->alg_name));
+    // check key type
+    if (pkeytype != NULL) {
+        if (*pkeytype == CKK_ML_KEM) {
+            *pkeytype = 0x00000049UL; /* TODO: hardcoded */
+        } else if (*pkeytype == CKK_ML_DSA) {
+            *pkeytype = 0x0000004aUL; /* TODO: hardcoded */
+        }
+    }
+
+    // check mech for generate
+    if (ptypeGenerate != NULL) {
+        if (ptypeGenerate->mechanism == CKM_ML_KEM_KEY_PAIR_GEN) {
+            ptypeGenerate->mechanism = 0x0000000fUL; /* TODO: hardcoded */
+            isMechMlkem = 1;
+        } else if (ptypeGenerate->mechanism == CKM_ML_DSA_KEY_PAIR_GEN) {
+            ptypeGenerate->mechanism = 0x0000001CUL; /* TODO: hardcoded */
+            isMechMldsa = 1;
+        }
+    }
+
+    // check mech for sign
+    if (ptypeSign != NULL) {
+        if (ptypeSign->mechanism == CKM_ML_DSA) {
+            ptypeSign->mechanism = 0x0000001DUL; /* TODO: hardcoded */
+            isMechMldsa = 1;
+        }
+    }
+
+    // check mech for encap
+    if (ptypeEncap != NULL) {
+        if (ptypeEncap->mechanism == CKM_MLKEM_KEM_KEY_ENCAP) {
+            ptypeEncap->mechanism = 0x00000017UL; /* TODO: hardcoded */
+            isMechMlkem = 1;
+        }
+    }
+
+    // check mech for decap
+    if (ptypeDecap != NULL) {
+        if (ptypeDecap->mechanism == CKM_MLKEM_KEM_KEY_DECAP) {
+            ptypeDecap->mechanism = 0x00000017UL; /* TODO: hardcoded */
+            isMechMlkem = 1;
+        }
+    }
+
+    // finally, check params
+    if (pparams != NULL) {
+        if (isMechMlkem) {
+            switch (*pparams) {
+            case CKP_ML_KEM_512:
+            case CKP_ML_KEM_512_IPD:
+                *pparams = 1; /* TODO: hardcoded */
+                break;
+            case CKP_ML_KEM_768:
+            case CKP_ML_KEM_768_IPD:
+                *pparams = 2; /* TODO: hardcoded */
+                break;
+            case CKP_ML_KEM_1024:
+            case CKP_ML_KEM_1024_IPD:
+                *pparams = 3; /* TODO: hardcoded */
+                break;
+            default:
+                *pparams = 0;
+                break;
+            }
+        }
+
+        if (isMechMldsa) {
+            switch (*pparams) {
+            case CKP_ML_DSA_44:
+            case CKP_ML_DSA_44_IPD:
+                *pparams = 1; /* TODO: hardcoded */
+                break;
+            case CKP_ML_DSA_65:
+            case CKP_ML_DSA_65_IPD:
+                *pparams = 2; /* TODO: hardcoded */
+                break;
+            case CKP_ML_DSA_87:
+            case CKP_ML_DSA_87_IPD:
+                *pparams = 3; /* TODO: hardcoded */
+                break;
+            default:
+                *pparams = 0;
+                break;
+            }
+        }
+    }
+}
+
+// get the public key bytes from hardware in case we need to (or prefer to) do public key crypto op in software
+static void _LUNA_OQS_findobject_helper_post(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *keyinfo,
+        int bFoundItHere) {
+    if (! bFoundItHere)
+        return;
+    if (keyctx->ctxtype == LUNA_PROV_CTXTYPE_ECXEXCH) {
+        // openssl computes public key bytes from private key bytes,
+        // so we MUST get the real public key bytes from hardware
+        (void)LunaEcxExportPublic(keyctx, keyinfo);
+    } else if (keyctx->ctxtype == LUNA_PROV_CTXTYPE_EDDSA) {
+        // openssl computes public key bytes from private key bytes,
+        // so we MUST get the real public key bytes from hardware
+        (void)LunaEcxExportPublic(keyctx, keyinfo);
+    }
+    // LUNA_PROV_CTXTYPE_OQS no issue
+    // LUNA_PROV_CTXTYPE_ECXGEN no issue
+}
+
+// query misc
+int luna_prov_get_DelegateHwPqcKemEncapToSw(void) {
+    return luna_get_DelegateHwPqcKemEncapToSw();
+}
+
+//
+// get RNG from hardware
+//
+
+// sticky error flag
+static int luna_pqc_rng_hw_error = 0;
+
+// query there is an error and we should bypass hardware
+static int luna_pqc_rng_hw_is_error(void) {
+    return luna_pqc_rng_hw_error;
+}
+
+// get RNG from pkcs11
+static CK_RV luna_pqc_rng_hw_pkcs11(uint8_t *out, size_t outlen) {
+    luna_prov_keyinfo keyinfo;
+    memset(&keyinfo, 0, sizeof(keyinfo));
+    CK_RV rv = (luna_open_context(&keyinfo.sess) == 1) ? CKR_OK : CKR_GENERAL_ERROR;
+    if (rv == CKR_OK) {
+        CK_SESSION_HANDLE session = keyinfo.sess.hSession;
+        rv = P11->C_GenerateRandom(session, out, outlen);
+        luna_close_context_w_err(&keyinfo.sess, (rv != CKR_OK), rv);
+    }
+    if (rv != CKR_OK) {
+        luna_pqc_rng_hw_error = 1;
+    }
+    return rv;
+}
+
+// statistics
+static struct {
+    unsigned big;
+    unsigned reset;
+    unsigned error;
+    unsigned copy;
+    unsigned cache;
+    unsigned liboqs;
+    unsigned hwm;
+} cnt = { 0, 0, 0, 0, 0, 0, 0 };
+
+// size of RNG cache for small requests (32-bytes)
+#define LUNA_PQC_RNG_SMALL (32)
+#define LUNA_PQC_RNG_CACHE (LUNA_PQC_RNG_SMALL * 40 * 2)
+
+static struct {
+    volatile int dirty;
+    volatile size_t offset;
+    CK_BYTE bytes[LUNA_PQC_RNG_CACHE];
+} rcache = { 1, 0, {0} }; /* must be static */
+
+static void luna_pqc_rng_hw_cleanse(void) {
+    memset(rcache.bytes, 0, sizeof(rcache.bytes));
+}
+
+// get RNG from cache
+static CK_RV luna_pqc_rng_hw_cache_locked(uint8_t *out, size_t outlen) {
+    // check request is larger than cache
+    if (outlen > LUNA_PQC_RNG_CACHE) {
+        cnt.big++;
+        return luna_pqc_rng_hw_pkcs11(out, outlen);
+    }
+    const size_t offset0 = rcache.offset;
+    const size_t offset1 = offset0 + outlen;
+    if ( rcache.dirty || (offset1 > LUNA_PQC_RNG_CACHE) ) {
+        // reset the cache
+        cnt.reset++;
+        rcache.dirty = 1;
+        CK_RV rv = luna_pqc_rng_hw_pkcs11(rcache.bytes, LUNA_PQC_RNG_CACHE);
+        if (rv != CKR_OK) {
+            cnt.error++;
+            return rv;
+        }
+        rcache.dirty = 0;
+        rcache.offset = outlen;
+        memcpy(out, &(rcache.bytes[0]), outlen);
+    } else {
+        // just copy from cache
+        cnt.copy++;
+        rcache.dirty = 0;
+        rcache.offset = offset1;
+        memcpy(out, &(rcache.bytes[offset0]), outlen);
+    }
+    return CKR_OK;
+}
+
+static CK_RV luna_pqc_rng_hw_cache(uint8_t *out, size_t outlen) {
+    lunasys_mutex_enter(&luna_pqc_rng_mu);
+    luna_pqc_rng_hw_cache_locked(out, outlen);
+    lunasys_mutex_exit(&luna_pqc_rng_mu);
+}
+
+static CK_RV luna_pqc_rng_hw_int(uint8_t *out, size_t outlen) {
+    // frequent small requests require the cache for performance
+    if (outlen <= LUNA_PQC_RNG_SMALL) {
+        cnt.cache++;
+        return luna_pqc_rng_hw_cache(out, outlen);
+    }
+    cnt.liboqs++;
+    return (luna_pqc_rng_liboqs(out, outlen), CKR_OK);
+}
+
+static CK_RV luna_pqc_rng_hw(uint8_t *out, size_t outlen) {
+    CK_RV rv = luna_pqc_rng_hw_int(out, outlen);
+    if (outlen > cnt.hwm)
+        cnt.hwm = outlen;
+#if 0
+    fprintf(stderr, "big = %u, reset = %u, error = %u, copy = %u, cache = %u, liboqs = %u, hwm = %u.\n",
+            cnt.big, cnt.reset, cnt.error, cnt.copy, cnt.cache, cnt.liboqs, cnt.hwm);
+#endif
+    return rv;
+}
+
+#endif /* LUNA_OQS */
 
