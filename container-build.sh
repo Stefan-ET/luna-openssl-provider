@@ -9,10 +9,10 @@ DOCKER_OS="ubi" # Red Hat Universal Base Image
 DOCKER_ARCH="amd64"
 DOCKER_IMG="$DOCKER_NAME.$DOCKER_OS.$DOCKER_ARCH"
 DOCKER_RUNNER="docker run --rm -t -v $(dirname $0):/home/luna/luna-openssl-provider $DOCKER_IMG"
-OPENSSL_VERSION="3.5.0"
+OPENSSL_VERSION="3.4.1"
 OPENSSL_TAR="openssl-$OPENSSL_VERSION.tar.gz"
 OPENSSL_URL="https://github.com/openssl/openssl/releases/download/openssl-3.5.0/$OPENSSL_TAR"
-LIBOQS_VERSION="0.10.0"
+LIBOQS_VERSION="0.12.0"
 LIBOQS_TAR="$LIBOQS_VERSION.tar.gz"
 LIBOQS_URL="https://github.com/open-quantum-safe/liboqs/archive/refs/tags/$LIBOQS_TAR"
 
