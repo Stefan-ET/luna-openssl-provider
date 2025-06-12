@@ -1,7 +1,19 @@
 #!/bin/bash
 
-# This script builds the project inside a Docker image.
-# For users who don't want to spend time on environment setup.
+##############################################################################
+##
+## This file is part of the "Luna OpenSSL for PQC" project.
+##
+## The " Luna OpenSSL for PQC " project is provided under the MIT license (see the
+## following Web site for further details: https://mit-license.org/ ).
+##
+## Copyright © 2025 Thales Group
+##
+###############################################################################
+##
+## Description:
+## This script builds the project inside a Docker image.
+## For users who don't want to spend time on environment setup.
 
 # Global variables
 DOCKER_NAME="lunabuilder"
