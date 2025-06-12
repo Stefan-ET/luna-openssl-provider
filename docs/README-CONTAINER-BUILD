@@ -1,0 +1,57 @@
+Copyright (c) 2025 Thales Group. All rights reserved.
+
+# PURPOSE
+
+This document describes how to build the Luna OpenSSL Provider, GEM Engine, and `sautil` utility using the provided Docker-based build environment.
+
+## Overview
+
+The build process is encapsulated in a containerized environment based on Red Hat UBI. This ensures a consistent and reproducible build across different systems.
+
+The following components are built:
+
+- **Luna OpenSSL Provider**
+- **GEM Engine**
+- **sautil** utility
+
+## Prerequisites
+
+Ensure the following tools are installed on your system:
+
+- Docker (or Podman)
+- `curl`
+- Git
+
+## Build Instructions
+
+1. **Clone the repository**:
+
+   ```bash
+   git clone --branch docker_ubi_build https://github.com/ThalesGroup/luna-openssl-provider.git
+   cd luna-openssl-provider
+   ```
+2. **Run the container build script**:
+
+The container-build.sh script builds the Docker image and builds the artifacts inside it
+
+
+   ```bash   
+   ./container-build.sh
+   ```
+This script performs the following steps:
+
+Builds the Docker image using the Dockerfile in the root of the repository.
+Runs the container to compile the Luna Provider, GEM Engine, and sautil.
+Packages the resulting binaries and libraries into a compressed archive: luna.tar.gz.
+Verify the output:
+
+3. After the build completes, the `luna.tar.gz` archive will be created in the root directory. It contains the following artifacts:
+
+   ```
+   builds/linux/rhel/64/3.2/
+   ├── sautil
+   ├── lunaprov.so
+   └── gem.so
+   ```
+
+Copyright (c) 2025 Thales Group. All rights reserved.
