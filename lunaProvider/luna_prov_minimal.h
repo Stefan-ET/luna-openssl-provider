@@ -30,7 +30,8 @@ typedef enum luna_prov_key_reason_en {
     LUNA_PROV_KEY_REASON_GEN = 1,
     LUNA_PROV_KEY_REASON_SET_PARAMS = 2,
     LUNA_PROV_KEY_REASON_FROM_DATA = 3,
-    LUNA_PROV_KEY_REASON_FROM_ENCODING = 4
+    LUNA_PROV_KEY_REASON_FROM_ENCODING = 4,
+    LUNA_PROV_KEY_REASON_CREATE = 5
 } luna_prov_key_reason;
 
 /* forward reference to luna key context */
@@ -117,8 +118,11 @@ void LUNA_OQS_READKEY_UNLOCK(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *keyin
 #define LUNA_POINTER_ADD(_vp, _ofs)  ( (void*) ( ((unsigned char*)(_vp)) + (_ofs) ) )
 
 /* query environment variable, faster */
-extern void luna_getenv_LUNAPROV_init(void);
+void luna_getenv_LUNAPROV_init(void);
 extern int luna_getenv_LUNAPROV_rc;
 #define luna_getenv_LUNAPROV() (luna_getenv_LUNAPROV_rc == 1)
+
+/* query misc */
+int luna_prov_get_DelegateHwPqcKemEncapToSw(void);
 
 #endif

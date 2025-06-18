@@ -379,7 +379,6 @@ static void LunaPqcCleanTemplate(luna_prov_key_ctx *keyctx, CK_ATTRIBUTE *pPubli
 
 static CK_RV LunaPqcFind(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyinfo) {
     CK_OBJECT_HANDLE publicObjectHandle = 0, privateObjectHandle = 0;
-    CK_KEY_PARAMS params = CKP_INVALID;
     CK_BBOOL yes = CK_TRUE;
 
     CK_ATTRIBUTE publicTemplate[] = {
@@ -405,7 +404,7 @@ static CK_RV LunaPqcFind(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyinfo)
     }
 
     // NOTE: lookup algorithm AFTER decode keyblob, because LunaLookupAlgName can fail
-    CK_RV rvlookup = LunaLookupAlgName(keyctx, NULL, &params, NULL, NULL, NULL, NULL);
+    CK_RV rvlookup = LunaLookupAlgName(keyctx, NULL, NULL, NULL, NULL, NULL, NULL);
     if (rvlookup != CKR_OK)
         return rvlookup;
 
@@ -485,6 +484,15 @@ static CK_RV LunaPqcGen(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyinfo, 
 
     if (is_kem) {
         ckaDerivePriv = ckaDerivePub = CK_TRUE;
+        if (luna_get_pqc_shim() ||
+                (keyctx->subtype == LUNA_PROV_SUBTYPE_x25519) ||
+                (keyctx->subtype == LUNA_PROV_SUBTYPE_x448) ) {
+            publicTemplate[publicTemplateCount].type = CKA_DERIVE;
+            privateTemplate[privateTemplateCount].type = CKA_DERIVE;
+        } else {
+            publicTemplate[publicTemplateCount].type = CKA_ENCAPSULATE;
+            privateTemplate[privateTemplateCount].type = CKA_DECAPSULATE;
+        }
         publicTemplateCount++;
         privateTemplateCount++;
         /* FIXME: this assumes that KEM keys are never persisted */
@@ -493,7 +501,7 @@ static CK_RV LunaPqcGen(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyinfo, 
     } else {
         ckaSign = ckaVerify = CK_TRUE;
         /* FIXME: this assumes that SIG keys are always persisted */
-        ckaTokenObject = CK_TRUE;
+        ckaTokenObject = luna_get_token_object() ? CK_TRUE : CK_FALSE;
     }
     keyctx->is_kem = is_kem;
 
@@ -528,11 +536,25 @@ static CK_RV LunaPqcGen(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyinfo, 
             publicTemplateCount++;
         }
     } else {
-        privateTemplate[privateTemplateCount].type = CKA_KEY_PARAMS;
-        privateTemplate[privateTemplateCount].pValue = &params;
-        privateTemplate[privateTemplateCount].ulValueLen = sizeof(params);
-        privateTemplateCount++;
+        if (luna_get_pqc_shim()) {
+            privateTemplate[privateTemplateCount].type = CKA_KEY_PARAMS;
+            privateTemplate[privateTemplateCount].pValue = &params;
+            privateTemplate[privateTemplateCount].ulValueLen = sizeof(params);
+            privateTemplateCount++;
+        } else {
+            // translate to main firmware
+            LunaTranslateFM2FW(keyctx, NULL, &params, &mechGen, NULL, NULL, NULL);
+            privateTemplate[privateTemplateCount].type = CKA_PARAMETER_SET;
+            privateTemplate[privateTemplateCount].pValue = &params;
+            privateTemplate[privateTemplateCount].ulValueLen = sizeof(params);
+            privateTemplateCount++;
+            publicTemplate[publicTemplateCount].type = CKA_PARAMETER_SET;
+            publicTemplate[publicTemplateCount].pValue = &params;
+            publicTemplate[publicTemplateCount].ulValueLen = sizeof(params);
+            publicTemplateCount++;
+        }
     }
+
     CK_SESSION_HANDLE session = pkeyinfo->sess.hSession;
     CK_RV rv = P11->C_GenerateKeyPair(session, &mechGen,
         publicTemplate, publicTemplateCount,
@@ -587,6 +609,9 @@ CK_RV LunaPqcSigSign(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyinfo,
     }
 
     if (rv == CKR_OK) {
+        if (! luna_get_pqc_shim()) {
+            LunaTranslateFM2FW(keyctx, NULL, NULL, NULL, &mechSig, NULL, NULL);
+        }
         rv = P11->C_SignInit(session, &mechSig, privateObjectHandle);
     }
 
@@ -644,6 +669,9 @@ CK_RV LunaPqcSigVerify(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyinfo,
     }
 
     if (rv == CKR_OK) {
+        if (! luna_get_pqc_shim()) {
+            LunaTranslateFM2FW(keyctx, NULL, NULL, NULL, &mechSig, NULL, NULL);
+        }
         rv = P11->C_VerifyInit(session, &mechSig, publicObjectHandle);
     }
     if (rv == CKR_OK) {

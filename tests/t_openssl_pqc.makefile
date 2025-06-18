@@ -73,11 +73,12 @@ tmppqc.foo:
 BASE_MD=sha512
 
 PKCS_MD=$(BASE_MD)
-PKCS_MD_OPTS=-$(PKCS_MD)
 ifneq ($(PKCS_MD),)
+PKCS_MD_OPTS=-$(PKCS_MD)
 SIGOPT_REQ=-sigopt digest:$(PKCS_MD)
 SIGOPT_X509=-sigopt digest:$(PKCS_MD)
 else
+PKCS_MD_OPTS=
 SIGOPT_REQ=
 SIGOPT_X509=
 endif
@@ -91,11 +92,12 @@ req0:
 	@echo '--------'
 
 PQC_MD=$(BASE_MD)
-PQC_MD_OPTS=-$(PQC_MD)
 ifneq ($(PQC_MD),)
+PQC_MD_OPTS=-$(PQC_MD)
 PKEYOPT_PQC=-pkeyopt digest:$(PQC_MD)
 SIGOPT_PQC=-sigopt digest:$(PQC_MD)
 else
+PQC_MD_OPTS=
 PKEYOPT_PQC=
 SIGOPT_PQC=
 endif

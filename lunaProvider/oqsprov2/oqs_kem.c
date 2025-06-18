@@ -106,6 +106,9 @@ static int oqs_kem_decaps_init(void *vpkemctx, void *vkem,
     return oqs_kem_decapsencaps_init(vpkemctx, vkem, EVP_PKEY_OP_DECAPSULATE);
 }
 
+// OPTIMIZATION: estimate buffer size
+#define LUNA_OQS_NO_QUERY_BUFFER_LEN 1
+
 /// Quantum-Safe KEM functions (OQS)
 
 static int oqs_qs_kem_encaps_keyslot(void *vpkemctx, unsigned char *out,
@@ -121,12 +124,14 @@ static int oqs_qs_kem_encaps_keyslot(void *vpkemctx, unsigned char *out,
         return -1;
     }
 
+#ifndef LUNA_OQS_NO_QUERY_BUFFER_LEN
     if (LUNA_OQS_QUERY_KEM_encaps(key->lunakeyctx) == LUNA_OQS_OK) {
         /* NOTE: LUNA_OQS_KEM_encaps will retrieve 'key->comp_pubkey[keyslot]' */
         return OQS_SUCCESS == LUNA_OQS_KEM_encaps(key->lunakeyctx,
             out, outlen,
             secret, secretlen);
     }
+#endif
 
     if (pkemctx->kem->comp_pubkey == NULL
         || pkemctx->kem->comp_pubkey[keyslot] == NULL) {
@@ -166,6 +171,15 @@ static int oqs_qs_kem_encaps_keyslot(void *vpkemctx, unsigned char *out,
     *outlen = kem_ctx->length_ciphertext;
     *secretlen = kem_ctx->length_shared_secret;
 
+#ifdef LUNA_OQS_NO_QUERY_BUFFER_LEN
+    if (LUNA_OQS_QUERY_KEM_encaps(key->lunakeyctx) == LUNA_OQS_OK) {
+        /* NOTE: LUNA_OQS_KEM_encaps will retrieve 'key->comp_pubkey[keyslot]' */
+        return OQS_SUCCESS == LUNA_OQS_KEM_encaps(key->lunakeyctx,
+            out, outlen,
+            secret, secretlen);
+    }
+#endif
+
     return OQS_SUCCESS
            == OQS_KEM_encaps(kem_ctx, out, secret,
                              pkemctx->kem->comp_pubkey[keyslot]);
@@ -184,12 +198,14 @@ static int oqs_qs_kem_decaps_keyslot(void *vpkemctx, unsigned char *out,
         return -1;
     }
 
+#ifndef LUNA_OQS_NO_QUERY_BUFFER_LEN
     if (LUNA_OQS_QUERY_KEM_decaps(key->lunakeyctx) == LUNA_OQS_OK) {
         /* NOTE: LUNA_OQS_KEM_decaps will retrieve 'key->comp_privkey[keyslot]' */
         return OQS_SUCCESS == LUNA_OQS_KEM_decaps(key->lunakeyctx,
             out, outlen,
             in, inlen);
     }
+#endif
 
     if (pkemctx->kem->comp_privkey == NULL
         || pkemctx->kem->comp_privkey[keyslot] == NULL) {
@@ -224,6 +240,15 @@ static int oqs_qs_kem_decaps_keyslot(void *vpkemctx, unsigned char *out,
     }
     *outlen = kem_ctx->length_shared_secret;
 
+#ifdef LUNA_OQS_NO_QUERY_BUFFER_LEN
+    if (LUNA_OQS_QUERY_KEM_decaps(key->lunakeyctx) == LUNA_OQS_OK) {
+        /* NOTE: LUNA_OQS_KEM_decaps will retrieve 'key->comp_privkey[keyslot]' */
+        return OQS_SUCCESS == LUNA_OQS_KEM_decaps(key->lunakeyctx,
+            out, outlen,
+            in, inlen);
+    }
+#endif
+
     return OQS_SUCCESS
            == OQS_KEM_decaps(kem_ctx, out, in,
                              pkemctx->kem->comp_privkey[keyslot]);
@@ -234,7 +259,8 @@ static int oqs_qs_kem_encaps(void *vpkemctx, unsigned char *out, size_t *outlen,
 {
     /* NOTE: keyslot=0 is ok, because this function is called for the non-hybrid testcase only */
     int rc =  oqs_qs_kem_encaps_keyslot(vpkemctx, out, outlen, secret, secretlen, 0);
-    oqs_debug_secret("oqs_qs_kem_encaps", rc, secret, secretlen);
+    oqs_debug_secret("oqs_qs_kem_encaps:out:", rc, out, outlen);
+    oqs_debug_secret("oqs_qs_kem_encaps:secret:", rc, secret, secretlen);
     return rc;
 }
 
@@ -242,8 +268,9 @@ static int oqs_qs_kem_decaps(void *vpkemctx, unsigned char *out, size_t *outlen,
                              const unsigned char *in, size_t inlen)
 {
     /* NOTE: keyslot=0 is ok, because this function is called for the non-hybrid testcase only */
+    oqs_debug_secret("oqs_qs_kem_decaps:in:", 1, in, &inlen);
     int rc = oqs_qs_kem_decaps_keyslot(vpkemctx, out, outlen, in, inlen, 0);
-    oqs_debug_secret("oqs_qs_kem_decaps", rc, out, outlen);
+    oqs_debug_secret("oqs_qs_kem_decaps:out:", rc, out, outlen);
     return rc;
 }
 
@@ -417,11 +444,13 @@ static int oqs_hyb_kem_encaps(void *vpkemctx, unsigned char *ct, size_t *ctlen,
 
     ret = oqs_evp_kem_encaps_keyslot(vpkemctx, NULL, &ctLen0, NULL, &secretLen0,
                                      0, flagPqcKeyInHardware);
-    oqs_debug_secret("oqs_evp_kem_encaps_keyslot", ret, NULL, &ctLen0);
+    oqs_debug_secret("oqs_hyb_kem_encaps:ct0:", ret, NULL, &ctLen0);
+    oqs_debug_secret("oqs_hyb_kem_encaps:secret0:", ret, NULL, &secretLen0);
     ON_ERR_SET_GOTO(ret <= 0, ret, OQS_ERROR, err);
     ret = oqs_qs_kem_encaps_keyslot(vpkemctx, NULL, &ctLen1, NULL, &secretLen1,
                                     1);
-    oqs_debug_secret("oqs_qs_kem_encaps_keyslot", ret, NULL, &ctLen1);
+    oqs_debug_secret("oqs_hyb_kem_encaps:ct1:", ret, NULL, &ctLen1);
+    oqs_debug_secret("oqs_hyb_kem_encaps:secret1:", ret, NULL, &secretLen1);
     ON_ERR_SET_GOTO(ret <= 0, ret, OQS_ERROR, err);
 
     *ctlen = ctLen0 + ctLen1;
@@ -440,12 +469,14 @@ static int oqs_hyb_kem_encaps(void *vpkemctx, unsigned char *ct, size_t *ctlen,
 
     ret = oqs_evp_kem_encaps_keyslot(vpkemctx, ct0, &ctLen0, secret0,
                                      &secretLen0, 0, flagPqcKeyInHardware);
-    oqs_debug_secret("oqs_evp_kem_encaps_keyslot", ret, ct0, &ctLen0);
+    oqs_debug_secret("oqs_hyb_kem_encaps:ct0:", ret, ct0, &ctLen0);
+    oqs_debug_secret("oqs_hyb_kem_encaps:secret0:", ret, secret0, &secretLen0);
     ON_ERR_SET_GOTO(ret <= 0, ret, OQS_ERROR, err);
 
     ret = oqs_qs_kem_encaps_keyslot(vpkemctx, ct1, &ctLen1, secret1,
                                     &secretLen1, 1);
-    oqs_debug_secret("oqs_qs_kem_encaps_keyslot", ret, ct1, &ctLen1);
+    oqs_debug_secret("oqs_hyb_kem_encaps:ct1:", ret, ct1, &ctLen1);
+    oqs_debug_secret("oqs_hyb_kem_encaps:secret1:", ret, secret1, &secretLen1);
     ON_ERR_SET_GOTO(ret <= 0, ret, OQS_ERROR, err);
 
 err:
@@ -466,11 +497,12 @@ static int oqs_hyb_kem_decaps(void *vpkemctx, unsigned char *secret,
     const unsigned char *ct0, *ct1;
     unsigned char *secret0, *secret1;
 
+    oqs_debug_secret("oqs_hyb_kem_decaps:ct:", 1, ct, &ctlen);
     ret = oqs_evp_kem_decaps_keyslot(vpkemctx, NULL, &secretLen0, NULL, 0, 0);
-    oqs_debug_secret("oqs_evp_kem_decaps_keyslot", ret, NULL, &secretLen0);
+    oqs_debug_secret("oqs_hyb_kem_decaps:secret0:", ret, NULL, &secretLen0);
     ON_ERR_SET_GOTO(ret <= 0, ret, OQS_ERROR, err);
     ret = oqs_qs_kem_decaps_keyslot(vpkemctx, NULL, &secretLen1, NULL, 0, 1);
-    oqs_debug_secret("oqs_qs_kem_decaps_keyslot", ret, NULL, &secretLen1);
+    oqs_debug_secret("oqs_hyb_kem_decaps:secret1:", ret, NULL, &secretLen1);
     ON_ERR_SET_GOTO(ret <= 0, ret, OQS_ERROR, err);
 
     *secretlen = secretLen0 + secretLen1;
@@ -490,11 +522,11 @@ static int oqs_hyb_kem_decaps(void *vpkemctx, unsigned char *secret,
 
     ret = oqs_evp_kem_decaps_keyslot(vpkemctx, secret0, &secretLen0, ct0,
                                      ctLen0, 0);
-    oqs_debug_secret("oqs_evp_kem_decaps_keyslot", ret, secret0, &secretLen0);
+    oqs_debug_secret("oqs_hyb_kem_decaps:secret0:", ret, secret0, &secretLen0);
     ON_ERR_SET_GOTO(ret <= 0, ret, OQS_ERROR, err);
     ret = oqs_qs_kem_decaps_keyslot(vpkemctx, secret1, &secretLen1, ct1, ctLen1,
                                     1);
-    oqs_debug_secret("oqs_qs_kem_decaps_keyslot", ret, secret1, &secretLen1);
+    oqs_debug_secret("oqs_hyb_kem_decaps:secret1:", ret, secret1, &secretLen1);
     ON_ERR_SET_GOTO(ret <= 0, ret, OQS_ERROR, err);
 
 err:
@@ -529,6 +561,8 @@ MAKE_HYB_KEM_FUNCTIONS(hybrid)
 static void oqs_debug_secret(const char *fn, int rc, const unsigned char *secret, const size_t *secretlen)
 {
 #ifdef DEBUG
+    if (! luna_getenv_LUNAPROV())
+        return;
     if (secret != NULL && secretlen != NULL && *secretlen >= 4 && rc > 0) {
         size_t slen = *secretlen;
         printf("\n%s: rc = %d, slen = %u, s = { %02x %02x ... %02x %02x } \n",

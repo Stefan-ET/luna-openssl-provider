@@ -22,10 +22,16 @@
 
 /* luna provider details as of toolkit 1.6 */
 #define LUNA_PROV_NAME_SZ "Thales Luna Provider"
-#define LUNA_PROV_VERSION_SZ "1.6.4"
-#define LUNA_PROV_BUILDINFO_SZ LUNA_PROV_VERSION_SZ
+#define LUNA_PROV_VERSION_SZ "1.7.0"
 #define LUNA_PROV_SZ "lunaprov"
 #define LUNA_PROV_CONCAT_SZ(a_, b_) a_ b_
+
+/* luna build info */
+#ifdef LUNA_OQS
+#define LUNA_PROV_BUILDINFO_SZ LUNA_PROV_VERSION_SZ " based on liboqs " OQS_VERSION_TEXT
+#else
+#define LUNA_PROV_BUILDINFO_SZ LUNA_PROV_VERSION_SZ
+#endif
 
 /* fips property */
 #ifdef LUNA_FIPS

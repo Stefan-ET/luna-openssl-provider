@@ -29,44 +29,104 @@ static CK_RV LunaPqcKemEncap(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyi
     CK_RV rvlookup = LunaLookupAlgName(keyctx, &keytype, &params, NULL, NULL, &encapMech, NULL);
     if (rvlookup != CKR_OK)
         return rvlookup;
-    if ( ! (CK_KEYTYPE_IS_PQC_KEM(keytype) || 0) )
+    const int isPqcKem = CK_KEYTYPE_IS_PQC_KEM(keytype);
+    if ( ! isPqcKem )
         return CKR_ARGUMENTS_BAD;
     if ( ! luna_prov_is_ecdh_len(secretLen) )
         return CKR_ARGUMENTS_BAD;
 
     // If the public key isn't in the HSM, encapsulation can take a byte array for pPublicKey and
     // the length is specified with ulPubKeyLen. In this case, the params must give the CKP_KYBER_* value as well
+    CK_SESSION_HANDLE session = pkeyinfo->sess.hSession;
     CK_OBJECT_HANDLE publicObjectHandle = 0;
     CK_KEM_ENCAP_PARAMS kyberEncapParams; /* same as CK_KYBER_ENCAP_PARAMS */
-    if (CK_KEYTYPE_IS_PQC_KEM(keytype)) {
-        memset(&kyberEncapParams, 0, sizeof(kyberEncapParams));
-        if (luna_prov_key_reason_pubkey(keyctx->reason)) {
-            LUNA_PRINTF(("encapsulate using buffer\n"));
-            publicObjectHandle = 0;
-            kyberEncapParams.pPublicKey = pkeyinfo->pubkey;
-            kyberEncapParams.ulPubKeyLen = pkeyinfo->pubkeylen;
-            kyberEncapParams.params = params;
-        } else if (keyctx->reason == LUNA_PROV_KEY_REASON_GEN) {
-            LUNA_PRINTF(("encapsulate using object\n"));
-            publicObjectHandle = keyctx->hPublic;
-            if (publicObjectHandle == 0) {
+    if (isPqcKem) {
+        if (luna_get_pqc_shim()) {
+            memset(&kyberEncapParams, 0, sizeof(kyberEncapParams));
+            // first, check LUNA_PROV_KEY_REASON_CREATE
+            if (keyctx->reason == LUNA_PROV_KEY_REASON_CREATE) {
+                LUNA_PRINTF(("fm.encapsulate using created object\n"));
+                publicObjectHandle = keyctx->hPublic;
+                if (publicObjectHandle == 0) {
+                    return CKR_KEY_CHANGED;
+                }
+                kyberEncapParams.pPublicKey = NULL;
+                kyberEncapParams.ulPubKeyLen = 0;
+                kyberEncapParams.params = 0;
+            } else if (luna_prov_key_reason_pubkey(keyctx->reason)) {
+                LUNA_PRINTF(("fm.encapsulate using buffer\n"));
+                publicObjectHandle = 0;
+                kyberEncapParams.pPublicKey = pkeyinfo->pubkey;
+                kyberEncapParams.ulPubKeyLen = pkeyinfo->pubkeylen;
+                kyberEncapParams.params = params;
+            } else if (keyctx->reason == LUNA_PROV_KEY_REASON_GEN) {
+                LUNA_PRINTF(("fm.encapsulate using generated object\n"));
+                publicObjectHandle = keyctx->hPublic;
+                if (publicObjectHandle == 0) {
+                    return CKR_KEY_CHANGED;
+                }
+                kyberEncapParams.pPublicKey = NULL;
+                kyberEncapParams.ulPubKeyLen = 0;
+                kyberEncapParams.params = 0;
+            } else {
                 return CKR_KEY_CHANGED;
             }
-            kyberEncapParams.pPublicKey = NULL;
-            kyberEncapParams.ulPubKeyLen = 0;
-            kyberEncapParams.params = 0;
-        } else {
-            return CKR_KEY_CHANGED;
-        }
-        kyberEncapParams.kdfType = CKD_NULL;
-        kyberEncapParams.pInfo = NULL;
-        kyberEncapParams.ulInfoLen = 0;
-        kyberEncapParams.pCiphertext = NULL;
-        kyberEncapParams.pulCiphertextLen = &cipherTextLen;
+            kyberEncapParams.kdfType = CKD_NULL;
+            kyberEncapParams.pInfo = NULL;
+            kyberEncapParams.ulInfoLen = 0;
+            kyberEncapParams.pCiphertext = NULL;
+            kyberEncapParams.pulCiphertextLen = &cipherTextLen;
 
-        //encapMech.mechanism = CKM_KYBER_KEM_KEY_ENCAP;
-        encapMech.pParameter = &kyberEncapParams;
-        encapMech.ulParameterLen = sizeof(kyberEncapParams);
+            encapMech.pParameter = &kyberEncapParams;
+            encapMech.ulParameterLen = sizeof(kyberEncapParams);
+
+        } else {
+            // translate to main firmware
+            LunaTranslateFM2FW(keyctx, &keytype, &params, NULL, NULL, &encapMech, NULL);
+            // first, check LUNA_PROV_KEY_REASON_CREATE
+            if (keyctx->reason == LUNA_PROV_KEY_REASON_CREATE) {
+                LUNA_PRINTF(("fw.encapsulate using created object\n"));
+                publicObjectHandle = keyctx->hPublic;
+                if (publicObjectHandle == 0) {
+                    return CKR_KEY_CHANGED;
+                }
+            } else if (luna_prov_key_reason_pubkey(keyctx->reason)) {
+                LUNA_PRINTF(("fw.encapsulate using created object(0)\n"));
+                publicObjectHandle = 0;
+                // create the public key once
+                {
+                    CK_ULONG ckoClass = CKO_PUBLIC_KEY;
+                    CK_BBOOL yes = CK_TRUE;
+                    CK_BBOOL no = CK_FALSE;
+                    CK_ATTRIBUTE attr[] = {
+                        { CKA_TOKEN, &no, sizeof(no) },
+                        { CKA_CLASS, &ckoClass, sizeof(ckoClass) },
+                        { CKA_KEY_TYPE, &keytype, sizeof(keytype) },
+                        { CKA_ENCAPSULATE, &yes, sizeof(yes) },
+                        { CKA_VALUE, 0, 0 },
+                        { CKA_PARAMETER_SET, &params, sizeof(params) },
+                    };
+                    CK_ATTRIBUTE *pattr = &attr[4];
+                    pattr->pValue = pkeyinfo->pubkey;
+                    pattr->ulValueLen = pkeyinfo->pubkeylen;
+                    if ( (P11->C_CreateObject(session, attr, DIM(attr), &publicObjectHandle) != CKR_OK)
+                            || (publicObjectHandle == 0) ) {
+                        LUNA_PRINTF(("C_CreateObject failed\n"));
+                        return CKR_KEY_CHANGED;
+                    }
+                    keyctx->hPublic = publicObjectHandle;
+                    _LUNA_OQS_WRITEKEY(keyctx, LUNA_PROV_KEY_REASON_CREATE);
+                }
+            } else if (keyctx->reason == LUNA_PROV_KEY_REASON_GEN) {
+                LUNA_PRINTF(("fw.encapsulate using generated object\n"));
+                publicObjectHandle = keyctx->hPublic;
+                if (publicObjectHandle == 0) {
+                    return CKR_KEY_CHANGED;
+                }
+            } else {
+                return CKR_KEY_CHANGED;
+            }
+        }
     }
 
     CK_ULONG valueLen = secretLen;
@@ -75,16 +135,19 @@ static CK_RV LunaPqcKemEncap(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyi
 
     CK_BBOOL yes = CK_TRUE;
     CK_BBOOL no = CK_FALSE;
+    CK_ULONG ckoSecret = CKO_SECRET_KEY;
     CK_ATTRIBUTE encapTemplate[] = {
+        {CKA_CLASS, &ckoSecret, sizeof(ckoSecret)}, // TODO: CKA_CLASS must be present?
         {CKA_TOKEN, &no, sizeof(no)},
-        {CKA_LABEL, encapLabel, strlen(encapLabel)},
         {CKA_VALUE_LEN, &valueLen, sizeof(valueLen)},
         {CKA_KEY_TYPE, &aesKeyType, sizeof(aesKeyType)},
         {CKA_MODIFIABLE, &no, sizeof(no)},
         {CKA_EXTRACTABLE, &yes, sizeof(yes)},
         {CKA_ENCRYPT, &yes, sizeof(yes)},
         {CKA_DECRYPT, &yes, sizeof(yes)},
+        {CKA_LABEL, encapLabel, strlen(encapLabel)}, // TODO: must be last?
     };
+
     CK_RV rv = CKR_OK;
 
     if (plen == NULL)
@@ -99,31 +162,56 @@ static CK_RV LunaPqcKemEncap(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyi
     }
 
     // Perform the encapsulation using the kyber public key. First get the length of the ciphertext
-    CK_SESSION_HANDLE session = pkeyinfo->sess.hSession;
-    if (rv == CKR_OK) {
-        rv = P11->C_DeriveKey(session, &encapMech, publicObjectHandle, encapTemplate, DIM(encapTemplate), &encapObjectHandle);
-        if (rv != CKR_OK) {
-            LUNA_PRINTF(("Failed to get ciphertext length: 0x%lx\n", rv));
-        } else {
-            LUNA_PRINTF(("Ciphertext length: %lu\n", cipherTextLen));
-        }
-    }
-
     if ( ppdata == NULL || psecret == NULL ) {
+        if (rv == CKR_OK) {
+            if (luna_get_pqc_shim()) {
+                rv = P11->C_DeriveKey(session, &encapMech, publicObjectHandle,
+                        encapTemplate, DIM(encapTemplate), &encapObjectHandle);
+            } else {
+                //rv = CKR_FUNCTION_NOT_SUPPORTED;
+                rv = p11.ext.CA_EncapsulateKey(session, &encapMech,
+                        publicObjectHandle,
+                        encapTemplate, DIM(encapTemplate),
+                        NULL, &cipherTextLen,
+                        &encapObjectHandle);
+            }
+
+            if (rv != CKR_OK) {
+                LUNA_PRINTF(("Failed to get ciphertext length: 0x%lx\n", rv));
+            } else {
+                LUNA_PRINTF(("Ciphertext length: %lu\n", cipherTextLen));
+            }
+        }
+
+        // always return output length
+        LUNA_PRINTF(("Ciphertext output length: %lu\n", cipherTextLen));
         *plen = cipherTextLen;
 
     } else {
-        if (*plen < cipherTextLen)
-            rv = CKR_BUFFER_TOO_SMALL;
-        *plen = cipherTextLen;
+        // input length
+        cipherTextLen = *plen;
+        LUNA_PRINTF(("Ciphertext input length: %lu\n", cipherTextLen));
+        if (cipherTextLen < 32)
+            return CKR_ARGUMENTS_BAD;
 
         if (rv == CKR_OK) {
             //allocate the ciphertext buffer and the derive the key. The cipherText buffer will be populated after this operation.
-            cipherText = malloc(cipherTextLen);
+            cipherText = OPENSSL_malloc(cipherTextLen);
             if (cipherText == NULL)
                 return CKR_GENERAL_ERROR;
             kyberEncapParams.pCiphertext = cipherText;
-            rv = P11->C_DeriveKey(session, &encapMech, publicObjectHandle, encapTemplate, DIM(encapTemplate), &encapObjectHandle);
+            if (luna_get_pqc_shim()) {
+                rv = P11->C_DeriveKey(session, &encapMech, publicObjectHandle,
+                        encapTemplate, DIM(encapTemplate), &encapObjectHandle);
+            } else {
+                //rv = CKR_FUNCTION_NOT_SUPPORTED;
+                rv = p11.ext.CA_EncapsulateKey(session, &encapMech,
+                        publicObjectHandle,
+                        encapTemplate, DIM(encapTemplate),
+                        cipherText, &cipherTextLen,
+                        &encapObjectHandle);
+            }
+
             if (rv != CKR_OK) {
                 LUNA_PRINTF(("PQC encap failed: 0x%lx\n", rv));
             } else {
@@ -143,7 +231,7 @@ static CK_RV LunaPqcKemEncap(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyi
 
         // clean buffers
         if (rv != CKR_OK) {
-            free(cipherText);
+            OPENSSL_free(cipherText);
         } else {
             *ppdata = cipherText;
         }
@@ -153,6 +241,9 @@ static CK_RV LunaPqcKemEncap(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyi
             (void)P11->C_DestroyObject(session, encapObjectHandle);
         }
 
+        // always return output length
+        LUNA_PRINTF(("Ciphertext output length: %lu\n", cipherTextLen));
+        *plen = cipherTextLen;
     }
 
     luna_context_set_last_error(&pkeyinfo->sess, rv);
@@ -171,12 +262,13 @@ static CK_RV LunaPqcKemDecap(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyi
     char *decapLabel = "temp-luna-kem-decap";
 
     CK_KEY_TYPE keytype = CKK_INVALID;
-    CK_KEY_PARAMS params = CKP_INVALID;
     CK_MECHANISM decapMech = {0,0,0};
-    CK_RV rvlookup = LunaLookupAlgName(keyctx, &keytype, &params, NULL, NULL, NULL, &decapMech);
+    CK_RV rvlookup = LunaLookupAlgName(keyctx, &keytype, NULL, NULL, NULL, NULL, &decapMech);
     if (rvlookup != CKR_OK)
         return rvlookup;
-    if ( ! (CK_KEYTYPE_IS_PQC_KEM(keytype) || CK_KEYTYPE_IS_ECX_KEM(keytype)) )
+    const int isPqcKem = CK_KEYTYPE_IS_PQC_KEM(keytype);
+    const int isEcxKem = CK_KEYTYPE_IS_ECX_KEM(keytype);
+    if ( ! (isPqcKem || isEcxKem) )
         return CKR_ARGUMENTS_BAD;
     if ( ! luna_prov_is_ecdh_len(secretLen) )
         return CKR_ARGUMENTS_BAD;
@@ -185,23 +277,29 @@ static CK_RV LunaPqcKemDecap(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyi
     CK_ECDH1_DERIVE_PARAMS ecxDecapParams;
     CK_BYTE bufEcxPubKey[64] = {0};
 
-    if (CK_KEYTYPE_IS_PQC_KEM(keytype)) {
-        memset(&kyberDecapParams, 0, sizeof(kyberDecapParams));
-        kyberDecapParams.kdfType = CKD_NULL;
-        kyberDecapParams.pCiphertext = (CK_BYTE*)cipherText;
-        kyberDecapParams.ulCiphertextLen = cipherTextLen;
-        kyberDecapParams.pInfo = NULL;
-        kyberDecapParams.ulInfoLen = 0;
+    if (isPqcKem) {
+        if (luna_get_pqc_shim()) {
+            memset(&kyberDecapParams, 0, sizeof(kyberDecapParams));
+            kyberDecapParams.kdfType = CKD_NULL;
+            kyberDecapParams.pCiphertext = (CK_BYTE*)cipherText;
+            kyberDecapParams.ulCiphertextLen = cipherTextLen;
+            kyberDecapParams.pInfo = NULL;
+            kyberDecapParams.ulInfoLen = 0;
 
-        decapMech.pParameter = &kyberDecapParams;
-        decapMech.ulParameterLen = sizeof(CK_KYBER_DECAP_PARAMS);
+            decapMech.pParameter = &kyberDecapParams;
+            decapMech.ulParameterLen = sizeof(CK_KYBER_DECAP_PARAMS);
+        } else {
+            // translate to main firmware
+            LunaTranslateFM2FW(keyctx, &keytype, NULL, NULL, NULL, NULL, &decapMech);
+        }
 
-    } else if (CK_KEYTYPE_IS_ECX_KEM(keytype)) {
+    } else if (isEcxKem) {
 
         LUNA_ASSERT( cipherTextLen <= (sizeof(bufEcxPubKey) - 2) );
         memcpy(&bufEcxPubKey[2], cipherText, cipherTextLen);
         bufEcxPubKey[0] = 0x04;
         bufEcxPubKey[1] = (CK_BYTE)(unsigned)cipherTextLen;
+        _LUNA_debug_ex("LunaPqcKemDecap", "bufEcxPubKey", bufEcxPubKey, (cipherTextLen + 2));
 
         memset(&ecxDecapParams, 0, sizeof(ecxDecapParams));
         ecxDecapParams.kdf = CKD_NULL;
@@ -216,15 +314,17 @@ static CK_RV LunaPqcKemDecap(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyi
 
     CK_BBOOL yes = CK_TRUE;
     CK_BBOOL no = CK_FALSE;
+    CK_ULONG ckoSecret = CKO_SECRET_KEY;
     CK_ATTRIBUTE decapTemplate[] = {
+        {CKA_CLASS, &ckoSecret, sizeof(ckoSecret)}, // TODO: CKA_CLASS must be present?
         {CKA_TOKEN, &no, sizeof(no)},
-        {CKA_LABEL, decapLabel, strlen(decapLabel)},
         {CKA_VALUE_LEN, &valueLen, sizeof(valueLen)},
         {CKA_KEY_TYPE, &aesKeyType, sizeof(aesKeyType)},
         {CKA_MODIFIABLE, &no, sizeof(no)},
         {CKA_EXTRACTABLE, &yes, sizeof(yes)},
         {CKA_ENCRYPT, &yes, sizeof(yes)},
         {CKA_DECRYPT, &yes, sizeof(yes)},
+        {CKA_LABEL, decapLabel, strlen(decapLabel)}, // TODO: must be last?
     };
 
     // check for stale object handle
@@ -238,7 +338,17 @@ static CK_RV LunaPqcKemDecap(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyi
     // Perform the decapsulation using the private key
     CK_SESSION_HANDLE session = pkeyinfo->sess.hSession;
     if (rv == CKR_OK) {
-        rv = P11->C_DeriveKey(session, &decapMech, privateObjectHandle, decapTemplate, DIM(decapTemplate), &decapObjectHandle);
+        if (isEcxKem || luna_get_pqc_shim()) {
+            rv = P11->C_DeriveKey(session, &decapMech, privateObjectHandle,
+                    decapTemplate, DIM(decapTemplate), &decapObjectHandle);
+        } else {
+            rv = p11.ext.CA_DecapsulateKey(session, &decapMech,
+                    privateObjectHandle,
+                    decapTemplate, DIM(decapTemplate),
+                    (CK_BYTE*)cipherText, cipherTextLen,
+                    &decapObjectHandle);
+        }
+
         if (rv != CKR_OK) {
             LUNA_PRINTF(("PQC decap failed: 0x%lx\n", rv));
         } else {
