@@ -141,6 +141,14 @@ if [ "$goal" = "build" ]; then
   if [ "$target" = "depends" ]; then
     ./generate.sh
   fi
+  # liboqs only (skip over openssl)
+  if [ "$target" = "liboqs" ]; then
+    ./generate.sh --skip-openssl
+  fi
+  # openssl only (skip over liboqs)
+  if [ "$target" = "openssl" ]; then
+    ./generate.sh --skip-liboqs
+  fi
 fi
 
 # clean all

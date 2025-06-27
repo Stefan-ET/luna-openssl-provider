@@ -627,8 +627,9 @@ static OQSX_KEY *oqsx_key_op(const X509_ALGOR *palg, const unsigned char *p,
         ERR_raise(ERR_LIB_USER, ERR_R_MALLOC_FAILURE);
         return 0;
     }
-    OQS_KEY_PRINTF2("OQSX KEY: Recreated OQSX key %s\n", key->tls_name);
 
+    LUNA_OQS_WRITEKEY_LOCK(key->lunakeyctx, LUNA_PROV_KEY_REASON_FROM_ENCODING);
+    OQS_KEY_PRINTF2("OQSX KEY: Recreated OQSX key %s\n", key->tls_name);
     if (op == KEY_OP_PUBLIC) {
 #ifdef USE_ENCODING_LIB
         if (key->oqsx_encoding_ctx.encoding_ctx
@@ -897,9 +898,11 @@ static OQSX_KEY *oqsx_key_op(const X509_ALGOR *palg, const unsigned char *p,
     if (!oqsx_key_set_composites(key) || !oqsx_key_recreate_classickey(key, op))
         goto err_key_op;
 
+    LUNA_OQS_WRITEKEY_UNLOCK(key->lunakeyctx);
     return key;
 
 err_key_op:
+    LUNA_OQS_WRITEKEY_UNLOCK(key->lunakeyctx);
     oqsx_key_free(key);
     return NULL;
 }
@@ -1709,7 +1712,8 @@ err_alloc:
     return ret;
 }
 
-int oqsx_key_fromdata(OQSX_KEY *key, const OSSL_PARAM params[],
+static
+int oqsx_key_fromdata_internal(OQSX_KEY *key, const OSSL_PARAM params[],
                       int include_private)
 {
     const OSSL_PARAM *pp1, *pp2;
@@ -1761,6 +1765,16 @@ int oqsx_key_fromdata(OQSX_KEY *key, const OSSL_PARAM params[],
             key, key->privkey != NULL ? KEY_OP_PRIVATE : KEY_OP_PUBLIC))
         return 0;
     return 1;
+}
+
+int oqsx_key_fromdata(OQSX_KEY *key, const OSSL_PARAM params[],
+                      int include_private)
+{
+    int rc;
+    LUNA_OQS_WRITEKEY_LOCK(key->lunakeyctx, LUNA_PROV_KEY_REASON_FROM_DATA);
+    rc = oqsx_key_fromdata_internal(key, params, include_private);
+    LUNA_OQS_WRITEKEY_UNLOCK(key->lunakeyctx);
+    return rc;
 }
 
 // OQS key always the last of the numkeys comp keys
@@ -1936,7 +1950,7 @@ int oqsx_key_gen(OQSX_KEY *key)
         const int flagKem = (key->keytype == KEY_TYPE_ECP_HYB_KEM || key->keytype == KEY_TYPE_ECX_HYB_KEM);
         const int flagHybrid = 1;
         const int flagDelegatable = (key->keytype == KEY_TYPE_ECP_HYB_KEM);
-        const int flagDelegate = 0; /* FIXME:FIXME: luna_get_DelegateHwPqcKemEncapToSw(); */
+        const int flagDelegate = luna_prov_get_DelegateHwPqcKemEncapToSw();
         pkey = lunax_oqsx_key_gen_evp_key(key->oqsx_provider_ctx.oqsx_evp_ctx,
                                     key->pubkey, key->privkey, 1,
                                     flagPqcKeyInHardware, flagPqcKeyPersistent);

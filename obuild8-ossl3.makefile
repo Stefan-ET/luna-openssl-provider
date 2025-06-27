@@ -20,11 +20,12 @@
 
 
 # openssl 3.2.1 or higher, with builtin fips module
-VERSION=3.2.1
+VERSION=3.4.1
 
 
-# liboqs 0.10.0 or higher, 64-bit only, ml-kem, ml-dsa
-LIBOQS_VERSION=0.10.0
+# liboqs 0.12.0 or higher, for FW ml-dsa
+#LIBOQS_VERSION=0.10.0
+LIBOQS_VERSION=0.12.0
 
 
 # openssl pre-configure options

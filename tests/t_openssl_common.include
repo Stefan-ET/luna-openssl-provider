@@ -38,6 +38,7 @@ else
 ifeq ($(PREFER_OQSPROV),1)
 # pqc testing with oqs provider
 SW_PROVIDER = -provider default -provider oqsprovider
+#SW_PROVIDER = -provider oqsprovider -provider default
 else
 # pqc testing with luna provider
 SW_PROVIDER = -provider lunaprov -provider default
@@ -57,6 +58,7 @@ else
 ifeq ($(PREFER_OQSPROV),1)
 # pqc testing with oqs provider
 HW_PROVIDER = -provider default -provider oqsprovider
+#HW_PROVIDER = -provider oqsprovider -provider default
 else
 # pqc testing with luna provider
 HW_PROVIDER = -provider lunaprov -provider default

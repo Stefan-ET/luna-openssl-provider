@@ -17,7 +17,7 @@ CNF_CPPFLAGS=$(CNF_CPPFLAGS_BASE) -D"UNICODE" -D"_UNICODE"
 
 # flags consistent with luna
 # NOTE: need to build openssl to ensure the static library matches the header files
-VERSION=3.2.1
+VERSION=3.4.1
 OPENSSL_SOURCE=..\openssl-build\openssl-$(VERSION)
 LIB2_STATIC=$(OPENSSL_SOURCE)\libcrypto_static.lib
 LIB2_DYNAMIC=$(OPENSSL_SOURCE)\libcrypto.lib
@@ -26,7 +26,7 @@ LIB_OQS_STATIC=$(LIBOQS_PREFIX)\lib\oqs.lib
 
 # flags consistent with lunaprov
 APPNAME=lunaprov
-LUNAPROV_DEFINES=/D"OS_WIN32" /D"LUNA_OQS" /D"LUNA_CLOUDFLARE" /D"OQS_PROVIDER_NOATOMIC"
+LUNAPROV_DEFINES=/D"OS_WIN32" /D"LUNA_OQS" /D"DEBUG" /U"NDEBUG" /D"LUNA_CLOUDFLARE" /D"OQS_PROVIDER_NOATOMIC"
 CL_OPTS32=$(DSO_CPPFLAGS) $(DSO_CFLAGS) $(LUNAPROV_DEFINES)
 CL_OPTS64=$(DSO_CPPFLAGS) $(DSO_CFLAGS) $(LUNAPROV_DEFINES) /D"OS_WIN64"
 LD_OPTS32=$(DSO_LDFLAGS)
@@ -48,7 +48,7 @@ OQS_SOURCES=oqsprov2\oqs_decode_der2key.c \
 
 # misc include paths
 INCLUDES_INTERNAL=-I$(OPENSSL_SOURCE)\include
-INCLUDES_INTERNAL_PROV=-I$(OPENSSL_SOURCE)\providers\implementations\include -I$(OPENSSL_SOURCE)\providers\common\include -I$(OPENSSL_SOURCE)\providers
+INCLUDES_INTERNAL_PROV=-I$(OPENSSL_SOURCE)\providers\implementations\include -I$(OPENSSL_SOURCE)\providers\common\include -I$(OPENSSL_SOURCE)\providers\fips\include -I$(OPENSSL_SOURCE)\providers
 INCLUDES_ENGINE=-I..\engine
 INCLUDES_OQS=-I.\oqsprov2 -I$(LIBOQS_PREFIX)\include
 INCLUDES_PROV=$(INCLUDES_ENGINE) $(INCLUDES_OQS) $(INCLUDES_INTERNAL_PROV)

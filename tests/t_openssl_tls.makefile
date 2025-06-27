@@ -28,14 +28,19 @@ X509_SIGOPT=
 # misc preference
 PREFER_PQC_CA=0
 PREFER_PQC_SERVER=0
+PREFER_PQC_GROUP=0
 PREFER_ECDHE=0
 PREFER_DHE=0
 PREFER_EC=0
+PREFER_PURE=0
 
 # root CA cert
 ifeq ($(PREFER_PQC_CA),1)
+ifeq ($(PREFER_PURE),1)
 GENPKEY1_ALGORITHM=-algorithm mldsa87
-#GENPKEY1_ALGORITHM=-algorithm p521_mldsa87
+else
+GENPKEY1_ALGORITHM=-algorithm p521_mldsa87
+endif
 GENPKEY1_PKEYOPT=
 REQ1_SIGOPT=
 REQ1_SIGOPT=-sigopt digest:$(REQ_DIGEST)
@@ -49,8 +54,11 @@ endif
 
 # intermediate CA cert
 ifeq ($(PREFER_PQC_CA),1)
+ifeq ($(PREFER_PURE),1)
 GENPKEY2_ALGORITHM=-algorithm mldsa65
-#GENPKEY2_ALGORITHM=-algorithm p384_mldsa65
+else
+GENPKEY2_ALGORITHM=-algorithm p384_mldsa65
+endif
 GENPKEY2_PKEYOPT=
 REQ2_SIGOPT=
 REQ2_SIGOPT=-sigopt digest:$(REQ_DIGEST)
@@ -82,23 +90,20 @@ endif
 
 else
 
-#KEYTYPE=PQC
-#GENPKEY3_ALGORITHM=-algorithm dilithium3
-#GENPKEY3_ALGORITHM=-algorithm p384_dilithium3
-#GENPKEY3_PKEYOPT=
-#REQ3_SIGOPT=-sigopt digest:$(REQ_DIGEST)
-
 KEYTYPE=PQC
+ifeq ($(PREFER_PURE),1)
 #GENPKEY3_ALGORITHM=-algorithm mldsa65
+#GENPKEY3_ALGORITHM=-algorithm ed25519
+#GENPKEY3_ALGORITHM=-algorithm ed448
+GENPKEY3_ALGORITHM=-algorithm mldsa44
+#GENPKEY3_ALGORITHM=-algorithm mldsa87
+else
 GENPKEY3_ALGORITHM=-algorithm p384_mldsa65
 #GENPKEY3_ALGORITHM=-algorithm mldsa65_pss3072
 #GENPKEY3_ALGORITHM=-algorithm mldsa65_rsa3072
 #GENPKEY3_ALGORITHM=-algorithm mldsa65_p256
 #GENPKEY3_ALGORITHM=-algorithm mldsa65_bp256
 #GENPKEY3_ALGORITHM=-algorithm mldsa65_ed25519
-#GENPKEY3_ALGORITHM=-algorithm ed25519
-#GENPKEY3_ALGORITHM=-algorithm ed448
-#GENPKEY3_ALGORITHM=-algorithm mldsa44
 #GENPKEY3_ALGORITHM=-algorithm p256_mldsa44
 #GENPKEY3_ALGORITHM=-algorithm rsa3072_mldsa44
 #GENPKEY3_ALGORITHM=-algorithm mldsa44_pss2048
@@ -106,15 +111,15 @@ GENPKEY3_ALGORITHM=-algorithm p384_mldsa65
 #GENPKEY3_ALGORITHM=-algorithm mldsa44_ed25519
 #GENPKEY3_ALGORITHM=-algorithm mldsa44_p256
 #GENPKEY3_ALGORITHM=-algorithm mldsa44_bp256
-#GENPKEY3_ALGORITHM=-algorithm mldsa87
 #GENPKEY3_ALGORITHM=-algorithm p521_mldsa87
 #GENPKEY3_ALGORITHM=-algorithm mldsa87_p384
 #GENPKEY3_ALGORITHM=-algorithm mldsa87_bp384
 #GENPKEY3_ALGORITHM=-algorithm mldsa87_ed448
+endif
 GENPKEY3_PKEYOPT=
-# NOTE: for algorithm ed25519/ed448 the digest is not settable, by lunaprov, and by oqsprovider
+# NOTE: for algorithms {ed,mldsa} the digest is not settable, by lunaprov, and by oqsprovider
 REQ3_SIGOPT=
-REQ3_SIGOPT=-sigopt digest:$(REQ_DIGEST)
+#REQ3_SIGOPT=-sigopt digest:$(REQ_DIGEST)
 
 endif
 
@@ -195,20 +200,26 @@ SW_KEYFORM_CLIENT=$(SW_KEYFORM)
 #SW_ENGINE_CLIENT=$(HW_ENGINE)
 #SW_KEYFORM_CLIENT=$(HW_KEYFORM)
 
-ifeq ($(PREFER_PQC_SERVER),1)
+ifeq ($(PREFER_PQC_GROUP),1)
 
 # google chrome (preferred order of algos)
-#TLSGROUPS=x25519_kyber768
+ifeq ($(PREFER_PURE),1)
+TLSGROUPS=kyber768
+else
+TLSGROUPS=x25519_kyber768
 #TLSGROUPS=p384_kyber768
 #TLSGROUPS=x448_kyber768
-#TLSGROUPS=kyber768
+endif
 
 # mlkem (preferred order of algos)
+ifeq ($(PREFER_PURE),1)
+TLSGROUPS=mlkem768
+else
 #TLSGROUPS=x448_mlkem768
 TLSGROUPS=x25519_mlkem768
 #TLSGROUPS=p384_mlkem768
 #TLSGROUPS=p256_mlkem768
-#TLSGROUPS=mlkem768
+endif
 
 else
 
@@ -429,8 +440,12 @@ cleanhsm_ED:
 
 # list various
 list:
+	openssl list $(HW_ENGINE_SERVER) -providers -verbose
+	@echo
 	openssl list $(HW_ENGINE_SERVER) -kem-algorithms
+	@echo
 	openssl list $(HW_ENGINE_SERVER) -signature-algorithms
+	@echo
 
 #
 # added for client auth

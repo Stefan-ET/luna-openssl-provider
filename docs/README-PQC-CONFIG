@@ -1,5 +1,5 @@
 
-Copyright 2022-2024 Thales Group. All rights reserved.
+Copyright 2022-2025 Thales Group. All rights reserved.
 
 
 
@@ -112,16 +112,25 @@ NEW (as of OpenSSL v1.1.1)
   EnableRsaPkcsPadding..0........Set to 1 to do padding in engine/provider.
   EnableEcGenKeyPair....0........Set to 1 for EC keygen in hardware.
   RecoveryLevel.........1........Set depth of recovery to 0 = no recovery, 1 = c_login, 2 = c_finalize.
+  EnableTokenObject.....1........Set to 0 to create session objects (re CKA_TOKEN) for "openssl speed" testing.
 
-NEW (as of OpenSSL v3.2.0)
+
+NEW (as of OpenSSL v3.2.0, provider only)
 
   EnablePqcGenKeyPair...0........Set to 1 for PQC keygen in hardware.
+  EnableEdGenKeyPair....0........Set to 1 for ED (ed25519, ed448) keygen in hardware.
+  EnableEmGenKeyPair....0........Set to 1 for EM (x25519, x448) keygen in hardware.
+
   IncludePqc..........ALL........Set to comma-separated list of algorithms preferred in hardware.
   ExcludePqc.........NONE........Set to comma-separated list of algorithms preferred in software.
 
-NEW (as of OpenSSL v3.2.1)
+  EnablePqcShim.........0........Set to 1 when using PQC FM instead of main firmware.
 
-  EnableEdGenKeyPair....0........Set to 1 for ED (ed25519, ed448) keygen in hardware.
+
+FINE TUNING (as of OpenSSL v3.2.0, provider only)
+
+  DelegateHwPqcKemEncapToSw......0...Set to 1 to delegate hardware-bound PQC KEM encaps to software.
+  DelegateSwPqcKemEncapRngToHw...0...Set to 1 to delegate software-bound PQC RNG to hardware.
 
 
 
@@ -134,10 +143,14 @@ EXAMPLE 1. configure for PQC KEM keys in hardware (TLS 1.3 usecase, "openssl s_s
     LibPath64 = /home/user1/libcklog2.so;
 
     DisableEcdsa = 0;
+    DisableEd = 0;
+    DisableEm = 0;
     DisablePqc = 0;
 
+    EnableTokenObject = 0;
     EnableEcGenKeyPair = 1;
     EnableEdGenKeyPair = 1;
+    EnableEmGenKeyPair = 1;
     EnablePqcGenKeyPair = 1;
 
     EngineInit = "myTokenLabel":0:0:passdev=console;
@@ -153,5 +166,5 @@ EXAMPLE 1. configure for PQC KEM keys in hardware (TLS 1.3 usecase, "openssl s_s
 
 
 
-Copyright 2022-2024 Thales Group. All rights reserved.
+Copyright 2022-2025 Thales Group. All rights reserved.
 

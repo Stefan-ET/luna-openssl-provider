@@ -411,10 +411,23 @@ static void luna_dump_s(char *prefix, const char *value);
 static void luna_dump_l(char *prefix, long value);
 #endif
 static char *luna_filenamedup(char *spath, char *sfile);
-static CK_RV STUB_CA_SetApplicationID(CK_ULONG major, CK_ULONG minor);
-static CK_RV STUB_CT_HsmIdFromSlotId(CK_SLOT_ID slotID, unsigned int *pHsmID);
-static CK_RV STUB_CA_GetHAState(CK_SLOT_ID slotId, CK_HA_STATE_PTR pState);
-static CK_RV STUB_CA_DeriveKeyAndWrap(CK_SESSION_HANDLE hSession,          /* session */
+
+/* stub functions, that must return success */
+static CK_RV STUB_CA_SetApplicationID(CK_ULONG major, CK_ULONG minor) {
+    return CKR_OK;
+}
+
+/* stub functions, that must return failure */
+static CK_RV STUB_CT_HsmIdFromSlotId(CK_SLOT_ID slotID, unsigned int *pHsmID) {
+    return CKR_FUNCTION_NOT_SUPPORTED;
+}
+
+static CK_RV STUB_CA_GetHAState(CK_SLOT_ID slotId, CK_HA_STATE_PTR pState) {
+    return CKR_FUNCTION_NOT_SUPPORTED;
+}
+
+static CK_RV STUB_CA_DeriveKeyAndWrap(
+        CK_SESSION_HANDLE hSession,          /* session */
         CK_MECHANISM_PTR  pMechanism,        /* derive mechanism */
         CK_OBJECT_HANDLE  hBaseKey,          /* base key */
         CK_ATTRIBUTE_PTR  pTemplate,         /* extra derive parameters (public key?) */
@@ -422,7 +435,34 @@ static CK_RV STUB_CA_DeriveKeyAndWrap(CK_SESSION_HANDLE hSession,          /* se
         CK_MECHANISM_PTR  pMechanismWrap,    /* wrap mechanism (can be no-encryption for now) */
         CK_OBJECT_HANDLE  hWrappingKey,      /* wrap key (can be NULL for now) */
         CK_BYTE_PTR       pWrappedKey,       /* gets wrapped key */
-        CK_ULONG_PTR      pulWrappedKeyLens);
+        CK_ULONG_PTR      pulWrappedKeyLens) {
+    return CKR_FUNCTION_NOT_SUPPORTED;
+}
+
+static CK_RV STUB_CA_EncapsulateKey(
+    CK_SESSION_HANDLE hSession,
+    CK_MECHANISM_PTR     pMechanism,
+    CK_OBJECT_HANDLE     hPublicKey,
+    CK_ATTRIBUTE_PTR     pTemplate,
+    CK_ULONG             ulAttributeCount,
+    CK_BYTE_PTR          pCiphertext,
+    CK_ULONG_PTR         pulCiphertextLen,
+    CK_OBJECT_HANDLE_PTR phKey) {
+    return CKR_FUNCTION_NOT_SUPPORTED;
+}
+
+static CK_RV STUB_CA_DecapsulateKey(
+    CK_SESSION_HANDLE    hSession,
+    CK_MECHANISM_PTR     pMechanism,
+    CK_OBJECT_HANDLE     hPrivateKey,
+    CK_ATTRIBUTE_PTR     pTemplate,
+    CK_ULONG             ulAttributeCount,
+    CK_BYTE_PTR          pCiphertextKey,
+    CK_ULONG             ulCiphertextLen,
+    CK_OBJECT_HANDLE_PTR phKey) {
+    return CKR_FUNCTION_NOT_SUPPORTED;
+}
+
 static int luna_ps_check_lib(void);
 static int luna_pa_check_lib(void);
 
@@ -463,6 +503,10 @@ static int luna_get_enable_ec_gen_key_pair(void);
 static int luna_get_enable_ed_gen_key_pair(void);
 static int luna_get_enable_em_gen_key_pair(void);
 static int luna_get_recovery_level(void);
+static int luna_get_token_object(void);
+static int luna_get_pqc_shim(void);
+static int luna_get_DelegateHwPqcKemEncapToSw(void);
+static int luna_get_DelegateSwPqcKemEncapRngToHw(void);
 
 static int luna_gets_passphrase(const char *szslotid, char *secretString, unsigned maxlen);
 static int luna_gets_passdll(const char *szslotid, char *secretString, unsigned maxlen, const char *szdll);
@@ -638,7 +682,7 @@ static struct {
    char *Engine2Init; /* experimental */
    char *LogRootDir;
    char *DisableSessionCache;
-   char *DisableEcdsa;
+   char *DisableEcdsa; /* misnomer: should be DisableEc since it applies to ecdsa and ecdh, etc */
 
    char *EnableRsaEx;
    char *EnableDsaEx;
@@ -667,8 +711,14 @@ static struct {
 
    char *EnableEdGenKeyPair; /* EC-EDWARDS keypair generation for PQC-hybrid and Classic */
    char *EnableEmGenKeyPair; /* EC-MONTGOMERY keypair generation for PQC-hybrid and Classic */
+   char *EnableTokenObject; /* create persistent objects in HSM (default=1) */
+   char *EnablePqcShim; /* using the PQC shim (default=0) */
+
+   char *DelegateHwPqcKemEncapToSw; /* delegate hardware-bound pqc kem encap to software (default=0) */
+   char *DelegateSwPqcKemEncapRngToHw; /* delegate software-bound pqc rng to hardware (default=0) */
 
 } g_config = {NULL, NULL, NULL, NULL,
+              NULL, NULL, NULL, NULL,
               NULL, NULL, NULL, NULL,
               NULL, NULL, NULL, NULL,
               NULL, NULL, NULL, NULL,
@@ -710,8 +760,10 @@ static struct {
       CK_CT_HsmIdFromSlotId CT_HsmIdFromSlotId;
       CK_CA_GetHAState CA_GetHAState;
       CK_CA_DeriveKeyAndWrap CA_DeriveKeyAndWrap;
+      CK_CA_EncapsulateKey CA_EncapsulateKey;
+      CK_CA_DecapsulateKey CA_DecapsulateKey;
    } ext;
-} p11 = {0, 0, {0, 0, 0, 0}};
+} p11 = {0, 0, {0, 0, 0, 0, 0, 0}};
 
 /* Saved function pointers */
 static int (*saved_rsa_pub_dec)(int flen, const unsigned char *from, unsigned char *to, RSA *rsa, int padding) = NULL;
@@ -1471,6 +1523,8 @@ static int luna_load_p11(void) {
          p11.ext.CT_HsmIdFromSlotId = (CK_CT_HsmIdFromSlotId)luna_dso_bind_func(luna_dso, "CT_HsmIdFromSlotId");
       }
       p11.ext.CA_DeriveKeyAndWrap = (CK_CA_DeriveKeyAndWrap)luna_dso_bind_func(luna_dso, "CA_DeriveKeyAndWrap");
+      p11.ext.CA_EncapsulateKey = (CK_CA_EncapsulateKey)luna_dso_bind_func(luna_dso, "CA_EncapsulateKey");
+      p11.ext.CA_DecapsulateKey = (CK_CA_DecapsulateKey)luna_dso_bind_func(luna_dso, "CA_DecapsulateKey");
    } else if (!luna_pa_check_lib()) {
       p11.C_GetFunctionList = (CK_C_GetFunctionList)luna_dso_bind_func(luna_dso, "P11Wrap_GetFunctionList");
       p11.ext.CA_SetApplicationID = (CK_CA_SetApplicationID)luna_dso_bind_func(luna_dso, "P11Wrap_SetApplicationID");
@@ -1480,6 +1534,8 @@ static int luna_load_p11(void) {
          p11.ext.CT_HsmIdFromSlotId = (CK_CT_HsmIdFromSlotId)luna_dso_bind_func(luna_dso, "P11Wrap_CT_HsmIdFromSlotId");
       }
       p11.ext.CA_DeriveKeyAndWrap = (CK_CA_DeriveKeyAndWrap)luna_dso_bind_func(luna_dso, "P11Wrap_DeriveKeyAndWrap");
+      p11.ext.CA_EncapsulateKey = (CK_CA_EncapsulateKey)luna_dso_bind_func(luna_dso, "P11Wrap_EncapsulateKey");
+      p11.ext.CA_DecapsulateKey = (CK_CA_DecapsulateKey)luna_dso_bind_func(luna_dso, "P11Wrap_DecapsulateKey");
    }
 
    if (p11.C_GetFunctionList == NULL) {
@@ -1515,6 +1571,14 @@ static int luna_load_p11(void) {
 
    if (p11.ext.CA_DeriveKeyAndWrap == NULL) {
       p11.ext.CA_DeriveKeyAndWrap = STUB_CA_DeriveKeyAndWrap;
+   }
+
+   if (p11.ext.CA_EncapsulateKey == NULL) {
+      p11.ext.CA_EncapsulateKey = STUB_CA_EncapsulateKey;
+   }
+
+   if (p11.ext.CA_DecapsulateKey == NULL) {
+      p11.ext.CA_DecapsulateKey = STUB_CA_DecapsulateKey;
    }
 
    retCode = p11.C_GetFunctionList(&p11.std);
@@ -4718,6 +4782,18 @@ static void luna_close_context(luna_context_t *context) {
    return;
 }
 
+#define LUNA_CONFIG_GETPROP(_name) do { \
+  if ((p = luna_getprop(cf, LUNA_CONF_SECTION, #_name))) { \
+    g_config._name = p; \
+  } \
+} while (0)
+
+#define LUNA_CONFIG_DEBUG(_name) do { \
+  if (g_config._name != NULL) { \
+    IF_LUNA_DEBUG(luna_dump_s(#_name" ", g_config._name)); \
+  } \
+} while (0)
+
 /* Configure module */
 static int luna_init_properties2(void) {
    char *p = NULL;
@@ -4790,6 +4866,10 @@ static int luna_init_properties2(void) {
    /* "DisableEcdsa" is optional to disable algorithm */
    if ((p = luna_getprop(cf, LUNA_CONF_SECTION, "DisableEcdsa"))) {
       g_config.DisableEcdsa = p;
+   } else {
+       if ((p = luna_getprop(cf, LUNA_CONF_SECTION, "DisableEc"))) {
+          g_config.DisableEcdsa = p;
+       }
    }
    /* "DisableRand" is optional to disable algorithm */
    if ((p = luna_getprop(cf, LUNA_CONF_SECTION, "DisableRand"))) {
@@ -4892,6 +4972,11 @@ static int luna_init_properties2(void) {
    if ((p = luna_getprop(cf, LUNA_CONF_SECTION, "RecoveryLevel"))) {
       g_config.RecoveryLevel = p;
    }
+   /* misc config malloc */
+   LUNA_CONFIG_GETPROP(EnableTokenObject);
+   LUNA_CONFIG_GETPROP(EnablePqcShim);
+   LUNA_CONFIG_GETPROP(DelegateHwPqcKemEncapToSw);
+   LUNA_CONFIG_GETPROP(DelegateSwPqcKemEncapRngToHw);
    /* from string to integer (speed optimization) */
    g_postconfig.LogLevel = (g_config.LogLevel != NULL) ? atoi(g_config.LogLevel) : 0;
    g_postconfig.DisableCheckFinalize =
@@ -4985,8 +5070,20 @@ static int luna_init_properties2(void) {
       IF_LUNA_DEBUG(luna_dump_s("ExcludePqc ", g_config.ExcludePqc ));
    if (g_config.RecoveryLevel )
       IF_LUNA_DEBUG(luna_dump_s("RecoveryLevel ", g_config.RecoveryLevel ));
+   /* misc config debug */
+   LUNA_CONFIG_DEBUG(EnableTokenObject);
+   LUNA_CONFIG_DEBUG(EnablePqcShim);
+   LUNA_CONFIG_DEBUG(DelegateHwPqcKemEncapToSw);
+   LUNA_CONFIG_DEBUG(DelegateSwPqcKemEncapRngToHw);
    return 0;
 }
+
+#define LUNA_CONFIG_FREE(_name) do { \
+  if (g_config._name != NULL) { \
+    LUNA_free(g_config._name); \
+    g_config._name = NULL; \
+  } \
+} while (0)
 
 /* Deconfigure module (undo luna_init_configure) */
 static void luna_fini_properties2(void) {
@@ -5130,6 +5227,11 @@ static void luna_fini_properties2(void) {
       LUNA_free(g_config.RecoveryLevel);
       g_config.RecoveryLevel = NULL;
    }
+   /* misc config free */
+   LUNA_CONFIG_FREE(EnableTokenObject);
+   LUNA_CONFIG_FREE(EnablePqcShim);
+   LUNA_CONFIG_FREE(DelegateHwPqcKemEncapToSw);
+   LUNA_CONFIG_FREE(DelegateSwPqcKemEncapRngToHw);
 }
 
 #define LUNA_MAX_LINE_LEN (1024)
@@ -5489,22 +5591,6 @@ err:
    return 0;
 }
 
-static CK_RV STUB_CA_SetApplicationID(CK_ULONG major, CK_ULONG minor) { return CKR_OK; }
-
-static CK_RV STUB_CT_HsmIdFromSlotId(CK_SLOT_ID slotID, unsigned int *pHsmID) { return CKR_OK; }
-
-static CK_RV STUB_CA_GetHAState(CK_SLOT_ID slotId, CK_HA_STATE_PTR pState) { return CKR_OK; }
-
-static CK_RV STUB_CA_DeriveKeyAndWrap(CK_SESSION_HANDLE hSession,          /* session */
-        CK_MECHANISM_PTR  pMechanism,        /* derive mechanism */
-        CK_OBJECT_HANDLE  hBaseKey,          /* base key */
-        CK_ATTRIBUTE_PTR  pTemplate,         /* extra derive parameters (public key?) */
-        CK_ULONG          ulAttributeCount,  /* template length */
-        CK_MECHANISM_PTR  pMechanismWrap,    /* wrap mechanism (can be no-encryption for now) */
-        CK_OBJECT_HANDLE  hWrappingKey,      /* wrap key (can be NULL for now) */
-        CK_BYTE_PTR       pWrappedKey,       /* gets wrapped key */
-        CK_ULONG_PTR      pulWrappedKeyLens) { return CKR_OK; }
-
 /* Get rsa extension */
 static int luna_get_rsa_ex(void) {
    int flags = 0;
@@ -5728,6 +5814,50 @@ static int luna_get_recovery_level(void) {
       value = atoi(g_config.RecoveryLevel);
    } else {
       value = 1; /* NOTE: 1 by default for DPOD */
+   }
+   return value;
+}
+
+/* Query is token object by default */
+static int luna_get_token_object(void) {
+   int value = 0;
+   if (g_config.EnableTokenObject != NULL) {
+      value = atoi(g_config.EnableTokenObject);
+   } else {
+      value = 1; /* NOTE: 1 by default for legacy */
+   }
+   return value;
+}
+
+/* Query using pqc shim */
+static int luna_get_pqc_shim(void) {
+   int value = 0;
+   if (g_config.EnablePqcShim != NULL) {
+      value = atoi(g_config.EnablePqcShim);
+   } else {
+      value = 0; /* NOTE: 0 by default going forward */
+   }
+   return value;
+}
+
+/* Query using DelegateHwPqcKemEncapToSw */
+static int luna_get_DelegateHwPqcKemEncapToSw(void) {
+   int value = 0;
+   if (g_config.DelegateHwPqcKemEncapToSw != NULL) {
+      value = atoi(g_config.DelegateHwPqcKemEncapToSw);
+   } else {
+      value = 0; /* NOTE: 0 by default */
+   }
+   return value;
+}
+
+/* Query using DelegateSwPqcKemEncapRngToHw */
+static int luna_get_DelegateSwPqcKemEncapRngToHw(void) {
+   int value = 0;
+   if (g_config.DelegateSwPqcKemEncapRngToHw != NULL) {
+      value = atoi(g_config.DelegateSwPqcKemEncapRngToHw);
+   } else {
+      value = 0; /* NOTE: 0 by default */
    }
    return value;
 }
@@ -6133,7 +6263,12 @@ const char *szLunaEngineComment41 = "EnableEcGenKeyPair was added";
 const char *szLunaEngineComment42 = "RecoveryLevel was added";
 const char *szLunaEngineComment43 = "EnableEdGenKeyPair was added";
 const char *szLunaEngineComment44 = "EnableEmGenKeyPair was added";
-const char *szLunaEngineCommentDevel = "CommentDevel: openssl-3.4.1-sw103";
+const char *szLunaEngineComment45 = "EnableTokenObject was added (default=1)";
+const char *szLunaEngineComment46 = "EnablePqcShim was added (default=0)";
+const char *szLunaEngineComment47 = "DelegateHwPqcKemEncapToSw was added (default=0)";
+const char *szLunaEngineComment48 = "DelegateSwPqcKemEncapRngToHw was added (default=0)";
+const char *szLunaEngineComment49 = "DisableEc is an alias for DisableEcdsa";
+const char *szLunaEngineCommentDevel = "CommentDevel: openssl-3.5.0-sw202";
 
 /* convert to CK_ULONG from ByteArray (little-endian) */
 static CK_ULONG luna_CK_ULONG_from_ByteArrayLE(CK_BYTE_PTR src, CK_ULONG srclen_) {
@@ -8337,15 +8472,17 @@ err:
 #define LUNA_FUNC_NAME "luna_rsa_keygen"
 
 /* generate rsa key in hardware */
-static int luna_rsa_keygen(RSA *rsa, int bits, BIGNUM *e, BN_GENCB *cb) {
+static int luna_rsa_keygen_ex(RSA *rsa, int bits, BIGNUM *e, BN_GENCB *cb,
+        int flagSessionObject) {
    CK_RV retCode = CKR_OK;
    CK_ULONG ulTemp = 0;
    CK_ULONG ulModBits = bits;
    EVP_PKEY *pkey = NULL;
    /*CK_BBOOL bFalse = 0;*/
-   CK_BBOOL bTrue = 1;
+   CK_BBOOL bTrue = CK_TRUE;
    CK_BBOOL bModifiable = CK_TRUE;
    CK_BBOOL bExtractable = CK_TRUE;
+   CK_BBOOL bTokenObject = (flagSessionObject ? CK_FALSE : CK_TRUE);
 
    CK_OBJECT_HANDLE priv_handle = LUNA_INVALID_HANDLE;
    CK_OBJECT_HANDLE pub_handle = LUNA_INVALID_HANDLE;
@@ -8479,7 +8616,7 @@ static int luna_rsa_keygen(RSA *rsa, int bits, BIGNUM *e, BN_GENCB *cb) {
       privTemplatePtr = priv_template;
 
       /* fill template (pub) */
-      luna_ckatab_replace(pub_template, LUNA_DIM(pub_template), CKA_TOKEN, &bTrue, sizeof(bTrue));
+      luna_ckatab_replace(pub_template, LUNA_DIM(pub_template), CKA_TOKEN, &bTokenObject, sizeof(bTrue));
       luna_ckatab_replace(pub_template, LUNA_DIM(pub_template), CKA_PRIVATE, &bTrue,
                           sizeof(bTrue)); /* private=1 for access control */
       luna_ckatab_replace(pub_template, LUNA_DIM(pub_template), CKA_ENCRYPT, &bTrue, sizeof(bTrue));
@@ -8494,7 +8631,7 @@ static int luna_rsa_keygen(RSA *rsa, int bits, BIGNUM *e, BN_GENCB *cb) {
       /* fill template (priv) */
       luna_ckatab_replace(priv_template, LUNA_DIM(priv_template), CKA_LABEL, (CK_BYTE_PTR)bufLabelPrivate,
                           (CK_ULONG)strlen(bufLabelPrivate));
-      luna_ckatab_replace(priv_template, LUNA_DIM(priv_template), CKA_TOKEN, &bTrue, sizeof(bTrue));
+      luna_ckatab_replace(priv_template, LUNA_DIM(priv_template), CKA_TOKEN, &bTokenObject, sizeof(bTrue));
       luna_ckatab_replace(priv_template, LUNA_DIM(priv_template), CKA_PRIVATE, &bTrue, sizeof(bTrue));
       luna_ckatab_replace(priv_template, LUNA_DIM(priv_template), CKA_SENSITIVE, &bTrue, sizeof(bTrue));
       luna_ckatab_replace(priv_template, LUNA_DIM(priv_template), CKA_DECRYPT, &bTrue, sizeof(bTrue));
@@ -8584,6 +8721,12 @@ err:
    return 0;
 }
 
+static int luna_rsa_keygen(RSA *rsa, int bits, BIGNUM *e, BN_GENCB *cb) {
+   int flagSessionObject = luna_get_token_object() ? 0 : 1;
+   int rc = luna_rsa_keygen_ex(rsa, bits, e, cb, flagSessionObject);
+   return rc;
+}
+
 #undef LUNA_FUNC_NAME
 #define LUNA_FUNC_NAME "luna_label_to_slotid"
 
@@ -8668,13 +8811,14 @@ err:
 #define LUNA_FUNC_NAME "luna_dsa_keygen"
 
 /* generate dsa key in hardware */
-static int luna_dsa_keygen(DSA *dsa) {
+static int luna_dsa_keygen_ex(DSA *dsa, int flagSessionObject) {
    CK_RV retCode = CKR_OK;
    EVP_PKEY *pkey = NULL;
    /*CK_BBOOL bFalse = 0;*/
-   CK_BBOOL bTrue = 1;
+   CK_BBOOL bTrue = CK_TRUE;
    CK_BBOOL bModifiable = CK_TRUE;
    CK_BBOOL bExtractable = CK_TRUE;
+   CK_BBOOL bTokenObject = (flagSessionObject ? CK_FALSE : CK_TRUE);
 
    CK_OBJECT_HANDLE priv_handle = LUNA_INVALID_HANDLE;
    CK_OBJECT_HANDLE pub_handle = LUNA_INVALID_HANDLE;
@@ -8779,7 +8923,7 @@ static int luna_dsa_keygen(DSA *dsa) {
    /* fill template (pub) */
    luna_ckatab_replace(pub_template, LUNA_DIM(pub_template), CKA_LABEL, (CK_BYTE_PTR)bufLabelPublic,
                        (CK_ULONG)strlen(bufLabelPublic));
-   luna_ckatab_replace(pub_template, LUNA_DIM(pub_template), CKA_TOKEN, &bTrue, sizeof(bTrue));
+   luna_ckatab_replace(pub_template, LUNA_DIM(pub_template), CKA_TOKEN, &bTokenObject, sizeof(bTrue));
    luna_ckatab_replace(pub_template, LUNA_DIM(pub_template), CKA_PRIVATE, &bTrue,
                        sizeof(bTrue)); /* private=1 for access control */
    luna_ckatab_replace(pub_template, LUNA_DIM(pub_template), CKA_PRIME, bufP, lenbufP);
@@ -8792,7 +8936,7 @@ static int luna_dsa_keygen(DSA *dsa) {
    /* fill template (priv) */
    luna_ckatab_replace(priv_template, LUNA_DIM(priv_template), CKA_LABEL, (CK_BYTE_PTR)bufLabelPrivate,
                        (CK_ULONG)strlen(bufLabelPrivate));
-   luna_ckatab_replace(priv_template, LUNA_DIM(priv_template), CKA_TOKEN, &bTrue, sizeof(bTrue));
+   luna_ckatab_replace(priv_template, LUNA_DIM(priv_template), CKA_TOKEN, &bTokenObject, sizeof(bTrue));
    luna_ckatab_replace(priv_template, LUNA_DIM(priv_template), CKA_PRIVATE, &bTrue, sizeof(bTrue));
    luna_ckatab_replace(priv_template, LUNA_DIM(priv_template), CKA_SENSITIVE, &bTrue, sizeof(bTrue));
    luna_ckatab_replace(priv_template, LUNA_DIM(priv_template), CKA_SIGN, &bTrue, sizeof(bTrue));
@@ -8865,6 +9009,12 @@ err:
       EVP_PKEY_free(pkey);
    luna_close_context_w_err(&ctx, -1, retCode);
    return 0;
+}
+
+static int luna_dsa_keygen(DSA *dsa) {
+   int flagSessionObject = luna_get_token_object() ? 0 : 1;
+   int rc = luna_dsa_keygen_ex(dsa, flagSessionObject);
+   return rc;
 }
 
 #undef LUNA_FUNC_NAME
@@ -9932,7 +10082,16 @@ static int luna_ecdsa_keygen(EC_KEY *key) {
    }
 
    /* generate keypair in hardware */
-   return luna_ec_keygen_hw_ex(key, 0, 0);
+   int flagSessionObject;
+   int flagDerive;
+   if (luna_get_token_object()) {
+      flagSessionObject = 0;
+      flagDerive = 0;
+   } else {
+      flagSessionObject = 1;
+      flagDerive = 1;
+   }
+   return luna_ec_keygen_hw_ex(key, flagSessionObject, flagDerive);
 }
 
 #undef LUNA_FUNC_NAME
