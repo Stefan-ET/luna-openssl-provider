@@ -1,7 +1,7 @@
 
 # Luna Crypto Provider (lunaprov)
 
-This project offers a plugin to Open SSL (3.0.7+, 3.1, 3.2, 3.3, 3.4, 3.5) for the purpose of generating and using cryptographic keys on a [Luna General Purpose HSMs](https://cpl.thalesgroup.com/encryption/hardware-security-modules/general-purpose-hsms), and more specifically [Luna Network HSMs](https://cpl.thalesgroup.com/encryption/hardware-security-modules/network-hsms). 
+This project offers a plugin to OpenSSL (3.0.7+, 3.1, 3.2, 3.3, 3.4, 3.5) for the purpose of generating and using cryptographic keys on a [Luna General Purpose HSMs](https://cpl.thalesgroup.com/encryption/hardware-security-modules/general-purpose-hsms), and more specifically [Luna Network HSMs](https://cpl.thalesgroup.com/encryption/hardware-security-modules/network-hsms). 
 
 ## Introduction
 
@@ -46,9 +46,13 @@ These operations require to create partitions, register clients, initialize user
     - cmake 3.27.9 (Kitware).
     - common UNIX commands (MinGW or Cygwin).
 
-## Run
+## Containerized Build
 
-For more details see the folder 'docs'.
+See 'docs/README-CONTAINER-BUILD'.
+
+## Build Documentation
+
+For more details on the build, see the folder 'docs'.
 
 ## Test
 
