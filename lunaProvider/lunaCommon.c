@@ -457,8 +457,13 @@ int luna_prov_EC_KEY_generate_key_ex(EC_KEY *key, int lunaflags)
         flagDerive = 1;
     } else {
         /* second, check for config (CKA_TOKEN) */
-        flagSessionObject = luna_get_token_object() ? 0 : 1;
-        flagDerive = 0;
+        if (luna_get_token_object()) {
+           flagSessionObject = 0;
+           flagDerive = 0;
+        } else {
+           flagSessionObject = 1;
+           flagDerive = 1;
+        }
     }
     return luna_ec_keygen_hw_ex(key, flagSessionObject, flagDerive);
 }
