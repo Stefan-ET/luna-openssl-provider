@@ -2713,8 +2713,8 @@ static CK_RV LunaUnwrapKeyBytesOAEP(luna_prov_key_ctx *keyctx, luna_prov_keyinfo
         mechWrap.mechanism = CKM_RSA_PKCS_OAEP;
         mechWrap.pParameter = &oaepParams;
         mechWrap.ulParameterLen = sizeof(oaepParams);
-        params->hashAlg = CKM_SHA_1;
-        params->mgf = CKG_MGF1_SHA1;
+        params->hashAlg = CKM_SHA256;
+        params->mgf = CKG_MGF1_SHA256;
         params->source = CKZ_DATA_SPECIFIED;
         params->pSourceData = 0;
         params->ulSourceDataLen = 0;
@@ -2741,7 +2741,7 @@ static CK_RV LunaUnwrapKeyBytesOAEP(luna_prov_key_ctx *keyctx, luna_prov_keyinfo
             unsigned char *out;
             size_t labellen;
             unsigned char label[256];
-        } evp = { NID_sha1, NULL, NULL, NULL, 0, NULL, 0, NULL, 0, {0} };
+        } evp = { NID_sha256, NULL, NULL, NULL, 0, NULL, 0, NULL, 0, {0} };
             evp.pkey = pkey;
             const EVP_MD *oaep_md = EVP_get_digestbynid(evp.nid);
             const EVP_MD *mgf1_md = EVP_get_digestbynid(evp.nid);

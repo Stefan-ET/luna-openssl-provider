@@ -683,7 +683,7 @@ static const OSSL_PARAM oqs_param_sigalg_list[][12] = {
                      "1.3.9999.2.7.4", 6),
 #    endif
 #    ifdef OQS_ENABLE_SIG_ml_dsa_44
-    OQS_SIGALG_ENTRY(mldsa44, mldsa44, mldsa44, "1.3.6.1.4.1.2.267.12.4.4", 7),
+    OQS_SIGALG_ENTRY(mldsa44, mldsa44, mldsa44, "2.16.840.1.101.3.4.3.17", 7),
     OQS_SIGALG_ENTRY(p256_mldsa44, p256_mldsa44, p256_mldsa44, "1.3.9999.7.1",
                      8),
     OQS_SIGALG_ENTRY(rsa3072_mldsa44, rsa3072_mldsa44, rsa3072_mldsa44,
@@ -700,7 +700,7 @@ static const OSSL_PARAM oqs_param_sigalg_list[][12] = {
                      "2.16.840.1.114027.80.8.1.5", 14),
 #    endif
 #    ifdef OQS_ENABLE_SIG_ml_dsa_65
-    OQS_SIGALG_ENTRY(mldsa65, mldsa65, mldsa65, "1.3.6.1.4.1.2.267.12.6.5", 15),
+    OQS_SIGALG_ENTRY(mldsa65, mldsa65, mldsa65, "2.16.840.1.101.3.4.3.18", 15),
     OQS_SIGALG_ENTRY(p384_mldsa65, p384_mldsa65, p384_mldsa65, "1.3.9999.7.3",
                      16),
     OQS_SIGALG_ENTRY(mldsa65_pss3072, mldsa65_pss3072, mldsa65_pss3072,
@@ -715,7 +715,7 @@ static const OSSL_PARAM oqs_param_sigalg_list[][12] = {
                      "2.16.840.1.114027.80.8.1.10", 21),
 #    endif
 #    ifdef OQS_ENABLE_SIG_ml_dsa_87
-    OQS_SIGALG_ENTRY(mldsa87, mldsa87, mldsa87, "1.3.6.1.4.1.2.267.12.8.7", 22),
+    OQS_SIGALG_ENTRY(mldsa87, mldsa87, mldsa87, "2.16.840.1.101.3.4.3.19", 22),
     OQS_SIGALG_ENTRY(p521_mldsa87, p521_mldsa87, p521_mldsa87, "1.3.9999.7.4",
                      23),
     OQS_SIGALG_ENTRY(mldsa87_p384, mldsa87_p384, mldsa87_p384,

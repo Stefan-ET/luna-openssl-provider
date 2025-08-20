@@ -22,7 +22,7 @@
 
 /* luna provider details as of toolkit 1.6 */
 #define LUNA_PROV_NAME_SZ "Thales Luna Provider"
-#define LUNA_PROV_VERSION_SZ "1.7.1"
+#define LUNA_PROV_VERSION_SZ "1.7.2"
 #define LUNA_PROV_SZ "lunaprov"
 #define LUNA_PROV_CONCAT_SZ(a_, b_) a_ b_
 
@@ -150,13 +150,13 @@ const char *oqs_oid_alg_list[OQS_OID_CNT] = {
     "kyber1024",
     "1.3.9999.99.30",
     "p521_kyber1024",
-    "1.3.6.1.4.1.22554.5.6.1",
+    "2.16.840.1.101.3.4.4.1",
     "mlkem512",
     "1.3.6.1.4.1.22554.5.7.1",
     "p256_mlkem512",
     "1.3.6.1.4.1.22554.5.8.1",
     "x25519_mlkem512",
-    "1.3.6.1.4.1.22554.5.6.2",
+    "2.16.840.1.101.3.4.4.2",
     "mlkem768",
     "1.3.9999.99.31",
     "p384_mlkem768",
@@ -166,7 +166,7 @@ const char *oqs_oid_alg_list[OQS_OID_CNT] = {
     "x25519_mlkem768",
     "1.3.9999.99.11",
     "p256_mlkem768",
-    "1.3.6.1.4.1.22554.5.6.3",
+    "2.16.840.1.101.3.4.4.3",
     "mlkem1024",
     "1.3.9999.99.32",
     "p521_mlkem1024",
@@ -221,7 +221,7 @@ const char *oqs_oid_alg_list[OQS_OID_CNT] = {
     "dilithium5",
     "1.3.9999.2.7.4",
     "p521_dilithium5",
-    "1.3.6.1.4.1.2.267.12.4.4",
+    "2.16.840.1.101.3.4.3.17",
     "mldsa44",
     "1.3.9999.7.1",
     "p256_mldsa44",
@@ -237,7 +237,7 @@ const char *oqs_oid_alg_list[OQS_OID_CNT] = {
     "mldsa44_p256",
     "2.16.840.1.114027.80.8.1.5",
     "mldsa44_bp256",
-    "1.3.6.1.4.1.2.267.12.6.5",
+    "2.16.840.1.101.3.4.3.18",
     "mldsa65",
     "1.3.9999.7.3",
     "p384_mldsa65",
@@ -251,7 +251,7 @@ const char *oqs_oid_alg_list[OQS_OID_CNT] = {
     "mldsa65_bp256",
     "2.16.840.1.114027.80.8.1.10",
     "mldsa65_ed25519",
-    "1.3.6.1.4.1.2.267.12.8.7",
+    "2.16.840.1.101.3.4.3.19",
     "mldsa87",
     "1.3.9999.7.4",
     "p521_mldsa87",
