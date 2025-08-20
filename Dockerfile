@@ -14,6 +14,9 @@
 
 FROM registry.access.redhat.com/ubi8/ubi
 
+ARG UID
+ARG GID
+
 #USER root
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -24,8 +27,8 @@ RUN \
     gcc make perl cmake
 RUN \
     # Create user and group
-    groupadd -g 501 app && \
-    useradd -u 1000 -g app -G app -s /bin/bash luna
+    groupadd -g "${GID}" luna && \
+    useradd -u "${UID}" -g luna -G luna -s /bin/bash luna
 
 # Switch to luna user: if execution required to be root, then it should be stated manually, at container run time
 USER luna

@@ -30,7 +30,7 @@ BASEOS_ARCH="amd64"
 IMAGE_NAME="${SUBPROJECT_NAME}.${BASEOS_NAME}.${BASEOS_ARCH}"
 
 OCI_RUNNER="docker"
-OCI_BUILD="${OCI_RUNNER} build -t ${IMAGE_NAME} ."
+OCI_BUILD="${OCI_RUNNER} build --build-arg UID=$(id -u) --build-arg GID=$(id -g) -t ${IMAGE_NAME} ."
 OCI_RUN="${OCI_RUNNER} run --rm -t -v ${PROJECT_PATH}:/home/luna/${PROJECT_NAME} ${IMAGE_NAME}"
 
 OPENSSL_VERSION=$(grep '^VERSIONS=' ./generate.sh | cut -d '"' -f2)
