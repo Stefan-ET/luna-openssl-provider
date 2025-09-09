@@ -86,20 +86,20 @@ static OQS_GROUP_CONSTANTS oqs_group_list[] = {
     {0x023D, 256, TLS1_3_VERSION, 0, -1, -1, 1},
 
     {0x2F3D, 256, TLS1_3_VERSION, 0, -1, -1, 1},
-    {0x0247, 128, TLS1_3_VERSION, 0, -1, -1, 1},
+    {512/*0x0247*/, 128, TLS1_3_VERSION, 0, -1, -1, 1}, // [26] mlkem512
 
     {0x2F47, 128, TLS1_3_VERSION, 0, -1, -1, 1},
     {0x2FB2, 128, TLS1_3_VERSION, 0, -1, -1, 1},
-    {0x0248, 192, TLS1_3_VERSION, 0, -1, -1, 1},
+    {513/*0x0248*/, 192, TLS1_3_VERSION, 0, -1, -1, 1}, // [29] mlkem768
 
     {0x2F48, 192, TLS1_3_VERSION, 0, -1, -1, 1}, // [30]
     {0x2FB3, 192, TLS1_3_VERSION, 0, -1, -1, 1},
-    {0x2FB4, 192, TLS1_3_VERSION, 0, -1, -1, 1},
-    {0x2FB5, 192, TLS1_3_VERSION, 0, -1, -1, 1},
-    {0x0249, 256, TLS1_3_VERSION, 0, -1, -1, 1},
+    {4588/*0x2FB4*/, 192, TLS1_3_VERSION, 0, -1, -1, 1}, // [32] x25519_mlkem768
+    {4587/*0x2FB5*/, 192, TLS1_3_VERSION, 0, -1, -1, 1}, // [33] p256_mlkem768
+    {514/*0x0249*/, 256, TLS1_3_VERSION, 0, -1, -1, 1}, // [34] mlkem1024
 
     {0x2F49, 256, TLS1_3_VERSION, 0, -1, -1, 1},
-    {0x2F4A, 256, TLS1_3_VERSION, 0, -1, -1, 1},
+    {4589/*0x2F4A*/, 256, TLS1_3_VERSION, 0, -1, -1, 1}, // [36] p384_mlkem1024
     {0x0241, 128, TLS1_3_VERSION, 0, -1, -1, 1},
 
     {0x2F41, 128, TLS1_3_VERSION, 0, -1, -1, 1},
@@ -311,27 +311,27 @@ typedef struct oqs_sigalg_constants_st {
 static OQS_SIGALG_CONSTANTS oqs_sigalg_list[] = {
     // ad-hoc assignments - take from OQS generate data structures
     ///// OQS_TEMPLATE_FRAGMENT_SIGALG_ASSIGNMENTS_START
-    {0xfea0, 128, TLS1_3_VERSION, 0}, {0xfea1, 128, TLS1_3_VERSION, 0},
+    {0xfea0, 128, TLS1_3_VERSION, 0}, {0xfea1, 128, TLS1_3_VERSION, 0}, // [0], [1]
     {0xfea2, 128, TLS1_3_VERSION, 0}, {0xfea3, 192, TLS1_3_VERSION, 0},
     {0xfea4, 192, TLS1_3_VERSION, 0}, {0xfea5, 256, TLS1_3_VERSION, 0},
-    {0xfea6, 256, TLS1_3_VERSION, 0}, {0xfed0, 128, TLS1_3_VERSION, 0},
+    {0xfea6, 256, TLS1_3_VERSION, 0}, {2308/*0xfed0*/, 128, TLS1_3_VERSION, 0}, // [6], [7] mldsa44
     {0xfed3, 128, TLS1_3_VERSION, 0}, {0xfed4, 128, TLS1_3_VERSION, 0},
-    {0xfee1, 128, TLS1_3_VERSION, 0}, {0xfee2, 128, TLS1_3_VERSION, 0},
+    {0xfee1, 128, TLS1_3_VERSION, 0}, {0xfee2, 128, TLS1_3_VERSION, 0}, // [10], [11]
     {0xfee3, 128, TLS1_3_VERSION, 0}, {0xfee4, 128, TLS1_3_VERSION, 0},
-    {0xfee5, 128, TLS1_3_VERSION, 0}, {0xfed1, 192, TLS1_3_VERSION, 0},
+    {0xfee5, 128, TLS1_3_VERSION, 0}, {2309/*0xfed1*/, 192, TLS1_3_VERSION, 0}, // [14], [15] mldsa65
     {0xfed5, 192, TLS1_3_VERSION, 0}, {0xfee6, 192, TLS1_3_VERSION, 0},
     {0xfee7, 192, TLS1_3_VERSION, 0}, {0xfee8, 192, TLS1_3_VERSION, 0},
-    {0xfee9, 192, TLS1_3_VERSION, 0}, {0xfeea, 192, TLS1_3_VERSION, 0},
-    {0xfed2, 256, TLS1_3_VERSION, 0}, {0xfed6, 256, TLS1_3_VERSION, 0},
+    {0xfee9, 192, TLS1_3_VERSION, 0}, {0xfeea, 192, TLS1_3_VERSION, 0}, // [20], [21]
+    {2310/*0xfed2*/, 256, TLS1_3_VERSION, 0}, {0xfed6, 256, TLS1_3_VERSION, 0}, // [22] mldsa87, [23]
     {0xfeeb, 256, TLS1_3_VERSION, 0}, {0xfeec, 256, TLS1_3_VERSION, 0},
     {0xfeed, 256, TLS1_3_VERSION, 0}, {0xfed7, 128, TLS1_3_VERSION, 0},
     {0xfed8, 128, TLS1_3_VERSION, 0}, {0xfed9, 128, TLS1_3_VERSION, 0},
-    {0xfedc, 128, TLS1_3_VERSION, 0}, {0xfedd, 128, TLS1_3_VERSION, 0},
+    {0xfedc, 128, TLS1_3_VERSION, 0}, {0xfedd, 128, TLS1_3_VERSION, 0}, // [30], [31]
     {0xfede, 128, TLS1_3_VERSION, 0}, {0xfeda, 256, TLS1_3_VERSION, 0},
     {0xfedb, 256, TLS1_3_VERSION, 0}, {0xfedf, 256, TLS1_3_VERSION, 0},
     {0xfee0, 256, TLS1_3_VERSION, 0}, {0xfeb3, 128, TLS1_3_VERSION, 0},
     {0xfeb4, 128, TLS1_3_VERSION, 0}, {0xfeb5, 128, TLS1_3_VERSION, 0},
-    {0xfeb6, 128, TLS1_3_VERSION, 0}, {0xfeb7, 128, TLS1_3_VERSION, 0},
+    {0xfeb6, 128, TLS1_3_VERSION, 0}, {0xfeb7, 128, TLS1_3_VERSION, 0}, // [40], [41]
     {0xfeb8, 128, TLS1_3_VERSION, 0}, {0xfeb9, 192, TLS1_3_VERSION, 0},
     {0xfeba, 192, TLS1_3_VERSION, 0}, {0xfec2, 128, TLS1_3_VERSION, 0},
     {0xfec3, 128, TLS1_3_VERSION, 0}, {0xfec4, 128, TLS1_3_VERSION, 0},

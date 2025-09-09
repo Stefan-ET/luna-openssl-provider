@@ -37,6 +37,10 @@ default0: all
 
 RSA_KEY=key0
 
+RSA_BITS=3072
+#RSA_BITS=4096
+#RSA_BITS=6144
+
 all: $(RSA_KEY) check0 req0 misc0 sign1 sign4 decrypt1 decrypt2
 	@echo
 
@@ -56,7 +60,7 @@ all_dgst: check0 sign2 sign3
 key0: tmp.pkey.0
 
 tmp.pkey.0: tmp.foo
-	openssl genpkey $(HW_ENGINE) -algorithm RSA -out tmp.pkey -pkeyopt rsa_keygen_bits:3072
+	openssl genpkey $(HW_ENGINE) -algorithm RSA -out tmp.pkey -pkeyopt rsa_keygen_bits:$(RSA_BITS)
 	cp tmp.pkey tmp.pkey.0
 	@echo '--------'
 
@@ -66,13 +70,13 @@ check0:
 
 # second choice: generate key via sautil
 tmp.pkey.1: tmp.foo
-	sautil -v -s 0 -i 0:0 -o -q -c -g 3072 -x 01:00:01 -f tmp.pkey
+	sautil -v -s 0 -i 0:0 -o -q -c -g $(RSA_BITS) -x 01:00:01 -f tmp.pkey
 	cp tmp.pkey tmp.pkey.1
 	@echo '--------'
 
 # last choice: generate key via openssl genrsa (openssl 1.0.2)
 tmp.pkey.2: tmp.foo
-	openssl genrsa $(HW_ENGINE) -f4 -out tmp.pkey 3072
+	openssl genrsa $(HW_ENGINE) -f4 -out tmp.pkey $(RSA_BITS)
 	cp tmp.pkey tmp.pkey.2
 	@echo '--------'
 
@@ -193,6 +197,7 @@ sign4:
 # decrypt pkcs1
 decrypt1:
 	rm -f message.enc message.dec
+	#openssl rand -hex -out message.txt 64
 	openssl pkeyutl $(SW_ENGINE) -encrypt -in message.txt -inkey tmp.pkey -out message.enc
 	openssl pkeyutl $(HW_ENGINE) $(HW_KEYFORM) -decrypt -in message.enc -inkey tmp.pkey -out message.dec
 	-diff -q -s message.txt message.dec
@@ -231,7 +236,7 @@ tmp1.foo:
 	@echo
 
 tmp1.pkey: tmp1.foo
-	openssl genpkey $(HW_ENGINE_ISSUER) -algorithm RSA -out tmp1.pkey -pkeyopt rsa_keygen_bits:3072
+	openssl genpkey $(HW_ENGINE_ISSUER) -algorithm RSA -out tmp1.pkey -pkeyopt rsa_keygen_bits:$(RSA_BITS)
 	@echo
 
 check1:
@@ -256,7 +261,7 @@ tmp2.foo:
 	@echo
 
 tmp2.pkey: tmp2.foo
-	openssl genpkey $(HW_ENGINE_SERVER) -algorithm RSA -out tmp2.pkey -pkeyopt rsa_keygen_bits:3072
+	openssl genpkey $(HW_ENGINE_SERVER) -algorithm RSA -out tmp2.pkey -pkeyopt rsa_keygen_bits:$(RSA_BITS)
 	@echo
 
 check2:

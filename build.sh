@@ -124,18 +124,22 @@ if [ "$goal" = "build" ]; then
   # provider
   if [ "$target" = "provider" -o "$target" = "all" ]; then
     ./gembuild provider-build
+    ./gembuild provider-install
   fi
   # engine is a subset of provider, hence not a part of all
   if [ "$target" = "engine" ]; then
     ./gembuild engine-build
+    ./gembuild engine-install
   fi
   # sautil
   if [ "$target" = "sautil" -o "$target" = "all" ]; then
     ./gembuild sautil-build
+    ./gembuild sautil-install
   fi
   # engineperf 
   if [ "$target" = "engineperf" -o "$target" = "all" ]; then
     ./gembuild engineperf-build
+    # NOTE: engineperf is not installed
   fi
   # depends
   if [ "$target" = "depends" ]; then

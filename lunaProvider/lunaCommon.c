@@ -1171,19 +1171,20 @@ static CK_RV LunaFind(luna_prov_key_ctx *keyctx, luna_prov_keyinfo *pkeyinfo,
 
 static void LUNA_OQS_refresh_subtype(luna_prov_key_ctx *keyctx) {
     const char *alg_name = keyctx->alg_name;
-    if (!strcmp(alg_name, "x25519")) {
+    // call strstr to detect ecx subtype for any case of {pure, hybrid, composite}
+    if (strstr(alg_name, "x25519") != NULL) {
         keyctx->is_kem = 1;
         keyctx->subtype = LUNA_PROV_SUBTYPE_x25519;
         keyctx->sublen = 32;
-    } else if (!strcmp(alg_name, "x448")) {
+    } else if (strstr(alg_name, "x448") != NULL) {
         keyctx->is_kem = 1;
         keyctx->subtype = LUNA_PROV_SUBTYPE_x448;
         keyctx->sublen = 56;
-    } else if (!strcmp(alg_name, "ed25519")) {
+    } else if (strstr(alg_name, "ed25519") != NULL) {
         keyctx->is_kem = 0;
         keyctx->subtype = LUNA_PROV_SUBTYPE_ed25519;
         keyctx->sublen = 32;
-    } else if (!strcmp(alg_name, "ed448")) {
+    } else if (strstr(alg_name, "ed448") != NULL) {
         keyctx->is_kem = 0;
         keyctx->subtype = LUNA_PROV_SUBTYPE_ed448;
         keyctx->sublen = 57;
@@ -3643,6 +3644,48 @@ static CK_RV luna_pqc_rng_hw(uint8_t *out, size_t outlen) {
             cnt.big, cnt.reset, cnt.error, cnt.copy, cnt.cache, cnt.liboqs, cnt.hwm);
 #endif
     return rv;
+}
+
+// set parameter by converting from provider internal format to external format
+int LUNA_PARAM_set_encoded_public_key(void *oqsxk_, OSSL_PARAM *p, const void *val, size_t len) {
+    OQSX_KEY *oqsxk = (OQSX_KEY *)oqsxk_;
+    if (oqsxk->keytype != KEY_TYPE_ECX_HYB_KEM)
+        return OSSL_PARAM_set_octet_string(p, val, len);
+    // special case of reverse keyshare for KEY_TYPE_ECX_HYB_KEM
+    const size_t sublen = oqsxk->lunakeyctx->sublen;
+    if ( (sublen > len) || (sublen < 1) ) {
+        LUNA_PRINTF(("BUG: sublen = %lu, len = %lu\n", sublen, len));
+        return 0;
+    }
+    unsigned char *srcbuf = (unsigned char *)val;
+    unsigned char *tmpbuf = OPENSSL_zalloc(len);
+    memcpy(tmpbuf, srcbuf+sublen, (len-sublen));
+    memcpy(tmpbuf+(len-sublen), srcbuf, sublen);
+    int rc = OSSL_PARAM_set_octet_string(p, tmpbuf, len);
+    OPENSSL_free(tmpbuf);
+    return rc;
+}
+
+// get parameter by converting from external format to provider internal format
+int LUNA_PARAM_get_encoded_public_key(void *oqsxk_, const OSSL_PARAM *p, void **val_ptr, size_t max_len, size_t *used_len) {
+    OQSX_KEY *oqsxk = (OQSX_KEY *)oqsxk_;
+    int rc = OSSL_PARAM_get_octet_string(p, val_ptr, max_len, used_len);
+    if ( (rc <= 0) || (oqsxk->keytype != KEY_TYPE_ECX_HYB_KEM) )
+        return rc;
+    // special case of reverse keyshare for KEY_TYPE_ECX_HYB_KEM
+    const size_t sublen = oqsxk->lunakeyctx->sublen;
+    const size_t len = *used_len;
+    if ( (sublen > len) || (sublen < 1) ) {
+        LUNA_PRINTF(("BUG: sublen = %lu, len = %lu\n", sublen, len));
+        return 0;
+    }
+    unsigned char *srcbuf = (unsigned char *)*val_ptr;
+    unsigned char *tmpbuf = OPENSSL_zalloc(len);
+    memcpy(tmpbuf, srcbuf+(len-sublen), sublen);
+    memcpy(tmpbuf+sublen, srcbuf, (len-sublen));
+    memcpy(*val_ptr, tmpbuf, len);
+    OPENSSL_free(tmpbuf);
+    return rc;
 }
 
 #endif /* LUNA_OQS */
