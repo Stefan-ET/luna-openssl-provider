@@ -20,6 +20,8 @@
 #include <openssl/rand.h>
 #include <string.h>
 
+#include "../luna_prov_minimal.h"
+
 // stolen from openssl/crypto/param_build_set.c as
 // ossl_param_build_set_octet_string not public API:
 
@@ -469,7 +471,7 @@ static int oqsx_get_params(void *key, OSSL_PARAM params[])
         // not be passed out:
         if (oqsxk->keytype == KEY_TYPE_ECP_HYB_KEM
             || oqsxk->keytype == KEY_TYPE_ECX_HYB_KEM) {
-            if (!OSSL_PARAM_set_octet_string(
+            if (!LUNA_PARAM_set_encoded_public_key(oqsxk,
                     p, (char *)oqsxk->pubkey + SIZE_OF_UINT32,
                     oqsxk->pubkeylen - SIZE_OF_UINT32))
                 return 0;
@@ -542,7 +544,7 @@ static int oqsx_set_params_internal(void *key, const OSSL_PARAM params[])
             // classic key len already stored by key setup; only data needs to
             // be filled in
             if (p->data_size != oqsxkey->pubkeylen - SIZE_OF_UINT32
-                || !OSSL_PARAM_get_octet_string(
+                || !LUNA_PARAM_get_encoded_public_key(oqsxkey,
                     p, &oqsxkey->comp_pubkey[0],
                     oqsxkey->pubkeylen - SIZE_OF_UINT32, &used_len)) {
                 return 0;

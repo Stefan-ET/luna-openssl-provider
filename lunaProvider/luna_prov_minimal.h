@@ -125,4 +125,8 @@ extern int luna_getenv_LUNAPROV_rc;
 /* query misc */
 int luna_prov_get_DelegateHwPqcKemEncapToSw(void);
 
+/* for reverse keyshare */
+int LUNA_PARAM_set_encoded_public_key(void *oqsxk, OSSL_PARAM *p, const void *val, size_t len);
+int LUNA_PARAM_get_encoded_public_key(void *oqsxk, const OSSL_PARAM *p, void **val, size_t max_len, size_t *used_len);
+
 #endif

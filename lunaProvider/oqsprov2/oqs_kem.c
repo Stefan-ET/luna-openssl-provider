@@ -462,10 +462,21 @@ static int oqs_hyb_kem_encaps(void *vpkemctx, unsigned char *ct, size_t *ctlen,
         return 1;
     }
 
-    ct0 = ct;
-    ct1 = ct + ctLen0;
-    secret0 = secret;
-    secret1 = secret + secretLen0;
+    if (pkemctx->kem->keytype == KEY_TYPE_ECX_HYB_KEM)
+    {
+        // special case of reverse keyshare for KEY_TYPE_ECX_HYB_KEM
+        ct1 = ct;
+        ct0 = ct1 + ctLen1;
+        secret1 = secret;
+        secret0 = secret + secretLen1;
+    }
+    else
+    {
+        ct0 = ct;
+        ct1 = ct + ctLen0;
+        secret0 = secret;
+        secret1 = secret + secretLen0;
+    }
 
     ret = oqs_evp_kem_encaps_keyslot(vpkemctx, ct0, &ctLen0, secret0,
                                      &secretLen0, 0, flagPqcKeyInHardware);
@@ -515,10 +526,21 @@ static int oqs_hyb_kem_decaps(void *vpkemctx, unsigned char *secret,
 
     ON_ERR_SET_GOTO(ctLen0 + ctLen1 != ctlen, ret, OQS_ERROR, err);
 
-    ct0 = ct;
-    ct1 = ct + ctLen0;
-    secret0 = secret;
-    secret1 = secret + secretLen0;
+    if (pkemctx->kem->keytype == KEY_TYPE_ECX_HYB_KEM)
+    {
+        // special case of reverse keyshare for KEY_TYPE_ECX_HYB_KEM
+        ct1 = ct;
+        ct0 = ct + ctLen1;
+        secret1 = secret;
+        secret0 = secret + secretLen1;
+    }
+    else
+    {
+        ct0 = ct;
+        ct1 = ct + ctLen0;
+        secret0 = secret;
+        secret1 = secret + secretLen0;
+    }
 
     ret = oqs_evp_kem_decaps_keyslot(vpkemctx, secret0, &secretLen0, ct0,
                                      ctLen0, 0);
