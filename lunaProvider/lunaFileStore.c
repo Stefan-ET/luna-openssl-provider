@@ -73,7 +73,8 @@ struct file_ctx_st {
     char *uri;                   /* The URI we currently try to load */
     enum {
         IS_FILE = 0,             /* Read file and pass results */
-        IS_DIR                   /* Pass directory entry names */
+        IS_DIR = 1,              /* Pass directory entry names */
+        IS_PKCS11 = 2            /* pkcs11 find object by label, etc */
     } type;
 
     union {
@@ -106,6 +107,13 @@ struct file_ctx_st {
             const char *last_entry;
             int last_errno;
         } dir;
+
+        /* Used with IS_PKCS11 */
+        struct {
+            LUNA_FIND_CTX *find_ctx;
+            int no_more_objects;
+        } pkcs11;
+
     } _;
 
     /* Expected object type.  May be unspecified */
@@ -119,10 +127,13 @@ static void free_file_ctx(struct file_ctx_st *ctx)
         return;
 
     OPENSSL_free(ctx->uri);
-    if (ctx->type != IS_DIR) {
+    if (ctx->type == IS_FILE) {
         OSSL_DECODER_CTX_free(ctx->_.file.decoderctx);
         OPENSSL_free(ctx->_.file.propq);
         OPENSSL_free(ctx->_.file.input_type);
+    }
+    if (ctx->type == IS_PKCS11) {
+        LUNA_FIND_CTX_free(ctx->_.pkcs11.find_ctx);
     }
     OPENSSL_free(ctx);
 }
@@ -198,6 +209,26 @@ static void *file_open_dir(const char *path, const char *uri, void *provctx)
     return ctx;
  err:
     file_close(ctx);
+    return NULL;
+}
+
+static struct file_ctx_st *file_open_pkcs11(const char *uri,
+                                            void *provctx)
+{
+    struct file_ctx_st *ctx;
+
+    LUNA_PRINTF(("\n"));
+    if ((ctx = new_file_ctx(IS_PKCS11, uri, provctx)) == NULL) {
+        ERR_raise(ERR_LIB_PROV, ERR_R_PROV_LIB);
+        goto err;
+    }
+    if ( (ctx->_.pkcs11.find_ctx = LUNA_FIND_CTX_new(uri)) == NULL ) {
+        ERR_raise(ERR_LIB_PROV, ERR_R_PROV_LIB);
+        goto err;
+    }
+    return ctx;
+ err:
+    free_file_ctx(ctx);
     return NULL;
 }
 
@@ -356,7 +387,7 @@ static int file_set_ctx_params(void *loaderctx, const OSSL_PARAM params[])
     if (params == NULL)
         return 1;
 
-    if (ctx->type != IS_DIR) {
+    if (ctx->type == IS_FILE) {
         /* these parameters are ignored for directories */
         p = OSSL_PARAM_locate_const(params, OSSL_STORE_PARAM_PROPERTIES);
         if (p != NULL) {
@@ -687,6 +718,10 @@ static int file_load_file(struct file_ctx_st *ctx,
     return ret;
 }
 
+static int file_load_pkcs11_object(struct file_ctx_st *ctx,
+                          OSSL_CALLBACK *object_cb, void *object_cbarg,
+                          OSSL_PASSPHRASE_CALLBACK *pw_cb, void *pw_cbarg);
+
 /*-
  *  Loading a name object from a directory
  *  --------------------------------------
@@ -850,6 +885,8 @@ static int file_load(void *loaderctx,
     case IS_DIR:
         return
             file_load_dir_entry(ctx, object_cb, object_cbarg, pw_cb, pw_cbarg);
+    case IS_PKCS11:
+        return file_load_pkcs11_object(ctx, object_cb, object_cbarg, pw_cb, pw_cbarg);
     default:
         break;
     }
@@ -879,6 +916,8 @@ static int file_eof(void *loaderctx)
          */
         return !BIO_pending(ctx->_.file.file)
             && BIO_eof(ctx->_.file.file);
+    case IS_PKCS11:
+        return ctx->_.pkcs11.no_more_objects;
     }
 
     /* ctx->type has an unexpected value */
@@ -909,6 +948,13 @@ static int file_close_stream(struct file_ctx_st *ctx)
     return 1;
 }
 
+static int file_close_pkcs11(struct file_ctx_st *ctx)
+{
+    LUNA_PRINTF(("\n"));
+    free_file_ctx(ctx);
+    return 1;
+}
+
 static int file_close(void *loaderctx)
 {
     struct file_ctx_st *ctx = loaderctx;
@@ -919,6 +965,8 @@ static int file_close(void *loaderctx)
         return file_close_dir(ctx);
     case IS_FILE:
         return file_close_stream(ctx);
+    case IS_PKCS11:
+        return file_close_pkcs11(ctx);
     }
 
     /* ctx->type has an unexpected value */
@@ -926,8 +974,10 @@ static int file_close(void *loaderctx)
     return 1;
 }
 
+static OSSL_FUNC_store_open_fn luna_uri_open;
+
 const OSSL_DISPATCH luna_file_store_functions[] = {
-    { OSSL_FUNC_STORE_OPEN, (void (*)(void))file_open },
+    { OSSL_FUNC_STORE_OPEN, (void (*)(void))luna_uri_open },
     { OSSL_FUNC_STORE_ATTACH, (void (*)(void))file_attach },
     { OSSL_FUNC_STORE_SETTABLE_CTX_PARAMS,
       (void (*)(void))file_settable_ctx_params },
@@ -938,7 +988,105 @@ const OSSL_DISPATCH luna_file_store_functions[] = {
     OSSL_DISPATCH_END,
 };
 
-
 #include "lunaFileAny2obj.c"
+
+//
+// find object from URI
+//
+// goals:
+// - parse uri such as "pkcs11:mylabel".
+// - open pkcs11 session.
+// - find object:
+//   - find keypair (aka OSSL_STORE_INFO_PKEY).
+//   - and/or find public key only (aka OSSL_STORE_INFO_PUBKEY).
+// - if dnssec bind then:
+//   - populate the store with both OSSL_STORE_INFO_PKEY and OSSL_STORE_INFO_PUBKEY.
+// - close pkcs11 session.
+//
+
+static void *luna_pkcs11_open(void *provctx, const char *uri);
+
+// URI prefix can be "file:" or "pkcs11:"
+static void *luna_uri_open(void *provctx, const char *uri)
+{
+    if ( (provctx == NULL) || (uri == NULL) )
+        return NULL;
+    LUNA_PRINTF(("uri=%s\n",uri));
+    if (strncmp(uri, "pkcs11:", 7) == 0)
+        return luna_pkcs11_open(provctx, &uri[7]); /* exclude prefix */
+    return file_open(provctx, &uri[0]); /* include prefix */
+}
+
+static void *luna_pkcs11_open(void *provctx, const char *uri)
+{
+    LUNA_PRINTF(("uri=%s\n",uri));
+    return file_open_pkcs11(uri, provctx);
+}
+
+// load one object (implies external iterator)
+static int file_load_pkcs11_object(struct file_ctx_st *ctx,
+                          OSSL_CALLBACK *object_cb, void *object_cbarg,
+                          OSSL_PASSPHRASE_CALLBACK *pw_cb, void *pw_cbarg)
+{
+    LUNA_ASSERT(ctx->_.pkcs11.no_more_objects == 0);
+    LUNA_FIND_CTX *find_ctx = ctx->_.pkcs11.find_ctx;
+    if (LUNA_FIND_CTX_next(find_ctx) != 1) {
+        ctx->_.pkcs11.no_more_objects = 1;
+        return 0;
+    }
+
+    LUNA_PKEY_CTX *pkctx = find_ctx->current;
+    LUNA_ASSERT(pkctx != NULL);
+    EVP_PKEY *pkey = pkctx->pkey;
+    LUNA_ASSERT(pkey != NULL);
+
+    const int pktype = EVP_PKEY_get_id(pkey);
+    LUNA_PRINTF(("pktype = %d\n", pktype));
+    int object_type = OSSL_OBJECT_PKEY;
+    char *data_type = NULL;
+    void *reference = NULL;
+    size_t reference_sz = 0;
+    switch (pktype) {
+    case EVP_PKEY_RSA:
+        data_type = "RSA"; // TODO: "RSA-PSS" ?
+        pkctx->kk.rsa = EVP_PKEY_get1_RSA(pkey);
+        LUNA_ASSERT(pkctx->kk.rsa != NULL);
+        reference = (void*)&pkctx->kk.rsa;
+        reference_sz = sizeof(reference);
+        break;
+    case EVP_PKEY_DSA:
+        data_type = "DSA";
+        pkctx->kk.dsa = EVP_PKEY_get1_DSA(pkey);
+        LUNA_ASSERT(pkctx->kk.dsa != NULL);
+        reference = (void*)&pkctx->kk.dsa;
+        reference_sz = sizeof(reference);
+        break;
+    case EVP_PKEY_EC:
+        data_type = "EC";
+        pkctx->kk.ec = EVP_PKEY_get1_EC_KEY(pkey);
+        LUNA_ASSERT(pkctx->kk.ec != NULL);
+        reference = (void*)&pkctx->kk.ec;
+        reference_sz = sizeof(reference);
+        break;
+    default:
+        // TODO: PQC keytypes
+        return 0;
+    }
+
+    LUNA_ASSERT(object_type != 0);
+    LUNA_ASSERT(data_type != NULL);
+    LUNA_ASSERT(reference != NULL);
+    LUNA_ASSERT(reference_sz != 0);
+    LUNA_PRINTF(("reference = 0x%p\n", reference));
+    LUNA_PRINTF(("reference_sz = %lu\n", reference_sz));
+    OSSL_PARAM params[4];
+    params[0] = OSSL_PARAM_construct_int(OSSL_OBJECT_PARAM_TYPE, &object_type);
+    params[1] = OSSL_PARAM_construct_utf8_string(OSSL_OBJECT_PARAM_DATA_TYPE, data_type, 0);
+    params[2] = OSSL_PARAM_construct_octet_string(OSSL_OBJECT_PARAM_REFERENCE, reference, reference_sz);
+    params[3] = OSSL_PARAM_construct_end();
+    int rc = object_cb(params, object_cbarg);
+    LUNA_PRINTF(("rc = %d\n", rc));
+    return rc;
+}
 
 

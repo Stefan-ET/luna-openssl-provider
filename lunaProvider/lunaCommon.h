@@ -321,6 +321,31 @@ int LUNAPROV_EVP_MD_CTX_set_params(LUNAPROV_EVP_MD_CTX *ctx, const OSSL_PARAM pa
 /* for coverity misc */
 #define LUNA_PROV_MAX_BUFFER ((64 * 1024) - 16) /* somewhat less than 64kB */
 
+/* for find object by uri */
+struct luna_context_st;
+
+typedef struct LUNA_PKEY_CTX_st {
+    EVP_PKEY *pkey;
+    union {
+        RSA *rsa;
+        DSA *dsa;
+        EC_KEY *ec;
+    } kk;
+} LUNA_PKEY_CTX;
+
+typedef struct LUNA_FIND_CTX_st {
+    int magic;
+    char *uri;
+    struct luna_context_st *psess;
+    int count;
+    LUNA_PKEY_CTX pkeys[3];
+    LUNA_PKEY_CTX *current;
+} LUNA_FIND_CTX;
+
+LUNA_FIND_CTX *LUNA_FIND_CTX_new(const char *uri);
+void LUNA_FIND_CTX_free(LUNA_FIND_CTX *ctx);
+int LUNA_FIND_CTX_next(LUNA_FIND_CTX *ctx);
+
 #endif
 
 

@@ -3690,3 +3690,76 @@ int LUNA_PARAM_get_encoded_public_key(void *oqsxk_, const OSSL_PARAM *p, void **
 
 #endif /* LUNA_OQS */
 
+/* for find object by uri */
+LUNA_FIND_CTX *LUNA_FIND_CTX_new(const char *uri) {
+    LUNA_PRINTF(("uri=%s\n", uri));
+    LUNA_FIND_CTX *ctx = OPENSSL_zalloc(sizeof(*ctx));
+    if (ctx == NULL)
+        return NULL;
+    ctx->uri = OPENSSL_strdup(uri);
+    if (ctx->uri == NULL) {
+        OPENSSL_free(ctx);
+        return NULL;
+    }
+    luna_context_t *psess = OPENSSL_zalloc(sizeof(*psess));
+    if (psess == NULL) {
+        OPENSSL_free(ctx->uri);
+        OPENSSL_free(ctx);
+        return NULL;
+    }
+    if (luna_open_context(psess) != 1) {
+        OPENSSL_free(psess);
+        OPENSSL_free(ctx->uri);
+        OPENSSL_free(ctx);
+        return NULL;
+    }
+    ctx->psess = psess;
+    ctx->magic = 1;
+    return ctx;
+}
+
+void LUNA_FIND_CTX_free(LUNA_FIND_CTX *ctx) {
+    LUNA_PRINTF(("\n"));
+    if (ctx == NULL)
+        return;
+    if (ctx->uri != NULL) {
+        OPENSSL_free(ctx->uri);
+    }
+    ctx->uri = NULL;
+    if (ctx->psess != NULL) {
+        luna_close_context(ctx->psess);
+        OPENSSL_free(ctx->psess);
+    }
+    ctx->psess = NULL;
+    ctx->magic = 0;
+    // TODO: free multiple pkeys
+    OPENSSL_free(ctx);
+}
+
+int LUNA_FIND_CTX_next(LUNA_FIND_CTX *ctx) {
+    int rc = 0;
+    EVP_PKEY *pkey = NULL;
+    LUNA_PRINTF(("count = %d\n", ctx->count));
+    switch (ctx->count) {
+    case 0:
+        // load PKEY (private key required and public key optional)
+        pkey = luna_load_anykey(NULL, ctx->uri, NULL, NULL, 0);
+        break;
+    case 1:
+        // load PUBKEY (public key required)
+        pkey = luna_load_anykey(NULL, ctx->uri, NULL, NULL, 1);
+        break;
+    default:
+        pkey = NULL;
+        break;
+    }
+    if (pkey != NULL) {
+        ctx->current = &ctx->pkeys[ctx->count];
+        ctx->current->pkey = pkey;
+        ctx->count++;
+        rc = 1;
+    }
+    LUNA_PRINTF(("rc = %d\n", rc));
+    return rc;
+}
+

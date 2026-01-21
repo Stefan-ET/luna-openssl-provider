@@ -299,7 +299,7 @@ static void luna_cache_delete_item(luna_cache_t *item);
 static void luna_cache_delete_ALL(luna_cache_t *head, luna_cache_delete_callback_f cb);
 
 /* Definitions for managing session contexts */
-typedef struct {
+typedef struct luna_context_st {
    int flagInit;               /* flag; true if valid */
    CK_SLOT_ID slotid;          /* slot id */
    CK_SESSION_HANDLE hSession; /* the session handle */
@@ -6268,7 +6268,7 @@ const char *szLunaEngineComment46 = "EnablePqcShim was added (default=0)";
 const char *szLunaEngineComment47 = "DelegateHwPqcKemEncapToSw was added (default=0)";
 const char *szLunaEngineComment48 = "DelegateSwPqcKemEncapRngToHw was added (default=0)";
 const char *szLunaEngineComment49 = "DisableEc is an alias for DisableEcdsa";
-const char *szLunaEngineCommentDevel = "CommentDevel: openssl-3.5.0-sw202";
+const char *szLunaEngineCommentDevel = "CommentDevel: openssl-3.5.0-sw300";
 
 /* convert to CK_ULONG from ByteArray (little-endian) */
 static CK_ULONG luna_CK_ULONG_from_ByteArrayLE(CK_BYTE_PTR src, CK_ULONG srclen_) {
@@ -6319,7 +6319,8 @@ static CK_ULONG luna_convert_attribute_to_ck_ulong(CK_ATTRIBUTE *pAttr) {
 }
 
 /* helper function (load RSA key) */
-static EVP_PKEY *luna_load_rsa(ENGINE *eng, luna_context_t *pctx, CK_OBJECT_HANDLE handle, CK_ULONG ulClass) {
+static EVP_PKEY *luna_load_rsa(ENGINE *eng, luna_context_t *pctx, CK_OBJECT_HANDLE handle, CK_ULONG ulClass,
+        int hintPublic) {
    EVP_PKEY *rckey = NULL;
 #ifndef OPENSSL_NO_RSA
    RSA *rsa = NULL;
@@ -6369,17 +6370,19 @@ static EVP_PKEY *luna_load_rsa(ENGINE *eng, luna_context_t *pctx, CK_OBJECT_HAND
    if (!LUNA_RSA_SET_n_e_d(rsa,
       BN_bin2bn(attrM.pValue, attrM.ulValueLen, NULL),
       BN_bin2bn(attrE.pValue, attrE.ulValueLen, NULL),
-      BN_bin2bn(attrOne.pValue, attrOne.ulValueLen, NULL)))
+      (hintPublic ? NULL : BN_bin2bn(attrOne.pValue, attrOne.ulValueLen, NULL))))
       goto err;
-   if (!LUNA_RSA_SET_p_q(rsa,
-      BN_bin2bn(attrOne.pValue, attrOne.ulValueLen, NULL),
-      BN_bin2bn(attrOne.pValue, attrOne.ulValueLen, NULL)))
-      goto err;
-   if (!LUNA_RSA_SET_dmp1_dmq1_iqmp(rsa,
-      BN_bin2bn(attrOne.pValue, attrOne.ulValueLen, NULL),
-      BN_bin2bn(attrOne.pValue, attrOne.ulValueLen, NULL),
-      BN_bin2bn(attrOne.pValue, attrOne.ulValueLen, NULL)))
-      goto err;
+   if (!hintPublic) {
+       if (!LUNA_RSA_SET_p_q(rsa,
+          BN_bin2bn(attrOne.pValue, attrOne.ulValueLen, NULL),
+          BN_bin2bn(attrOne.pValue, attrOne.ulValueLen, NULL)))
+          goto err;
+       if (!LUNA_RSA_SET_dmp1_dmq1_iqmp(rsa,
+          BN_bin2bn(attrOne.pValue, attrOne.ulValueLen, NULL),
+          BN_bin2bn(attrOne.pValue, attrOne.ulValueLen, NULL),
+          BN_bin2bn(attrOne.pValue, attrOne.ulValueLen, NULL)))
+          goto err;
+   }
    /* possible flags: RSA_FLAG_FIPS_METHOD, RSA_FLAG_NON_FIPS_ALLOW, RSA_FLAG_EXT_PKEY */
 #ifdef RSA_FLAG_FIPS_METHOD
    LUNA_RSA_OR_FLAGS(rsa, RSA_FLAG_FIPS_METHOD);
@@ -6424,7 +6427,8 @@ err:
 }
 
 /* helper function (load DSA key) */
-static EVP_PKEY *luna_load_dsa(ENGINE *eng, luna_context_t *pctx, CK_OBJECT_HANDLE handle, CK_ULONG ulClass) {
+static EVP_PKEY *luna_load_dsa(ENGINE *eng, luna_context_t *pctx, CK_OBJECT_HANDLE handle, CK_ULONG ulClass,
+        int hintPublic) {
    EVP_PKEY *rckey = NULL;
 #ifndef OPENSSL_NO_DSA
    CK_ULONG ulKeyClass = 0;
@@ -6565,7 +6569,7 @@ static EVP_PKEY *luna_load_dsa(ENGINE *eng, luna_context_t *pctx, CK_OBJECT_HAND
       goto err;
    if (!LUNA_DSA_SET_pub_priv(dsa,
       BN_bin2bn(attrV.pValue, attrV.ulValueLen, NULL),
-      BN_bin2bn(attrOne.pValue, attrOne.ulValueLen, NULL)))
+      (hintPublic ? NULL : BN_bin2bn(attrOne.pValue, attrOne.ulValueLen, NULL))))
       goto err;
    /* possible flags: DSA_FLAG_FIPS_METHOD, DSA_FLAG_NON_FIPS_ALLOW, (DSA_FLAG_EXT_PKEY) */
 #ifdef DSA_FLAG_FIPS_METHOD
@@ -6611,7 +6615,7 @@ err:
 
 /* helper function (load ECDSA key) */
 static EVP_PKEY *luna_load_ecdsa_FAST(ENGINE *eng, luna_context_t *pctx,
-        CK_OBJECT_HANDLE hPublicIn, CK_OBJECT_HANDLE hPrivateIn) {
+        CK_OBJECT_HANDLE hPublicIn, CK_OBJECT_HANDLE hPrivateIn, int hintPublic) {
    EVP_PKEY *rckey = NULL;
 #if defined(LUNA_OSSL_ECDSA)
    EC_KEY *dsa = NULL;
@@ -6778,7 +6782,7 @@ static EVP_PKEY *luna_load_ecdsa_FAST(ENGINE *eng, luna_context_t *pctx,
    }
 
    /* set private key (enhanced) */
-   if (1) {
+   if (!hintPublic) {
       int i;
       unsigned char private_bin[512];
       int order = 0;
@@ -7234,17 +7238,18 @@ gather_method:
          switch (ulType) {
             case CKK_RSA: {
                /* NOTE: luna_load_rsa may need to side-effect ctx.rv_last */
-               rckey = luna_load_rsa(eng, &ctx, handle, ulClass);
+               rckey = luna_load_rsa(eng, &ctx, handle, ulClass, hintPublic);
             } break;
             case CKK_DSA: {
                /* NOTE: luna_load_dsa may need to side-effect ctx.rv_last */
-               rckey = luna_load_dsa(eng, &ctx, handle, ulClass);
+               rckey = luna_load_dsa(eng, &ctx, handle, ulClass, hintPublic);
             } break;
             case CKK_ECDSA: {
                /* NOTE: luna_load_ecdsa_FAST may need to side-effect ctx.rv_last */
                rckey = luna_load_ecdsa_FAST(eng, &ctx,
                        (ulClass == CKO_PUBLIC_KEY ? handle : LUNA_INVALID_HANDLE),
-                       (ulClass == CKO_PRIVATE_KEY ? handle : LUNA_INVALID_HANDLE) );
+                       (ulClass == CKO_PRIVATE_KEY ? handle : LUNA_INVALID_HANDLE),
+                       hintPublic );
             } break;
             default: {
                LUNACA3err(LUNACA3_F_LOADKEY, LUNACA3_R_ENOSYS);
@@ -8669,9 +8674,9 @@ static int luna_rsa_keygen_ex(RSA *rsa, int bits, BIGNUM *e, BN_GENCB *cb,
    }
 
    if (luna_pa_check_lib()) {
-      pkey = luna_load_rsa(NULL, &ctx, pub_handle, CKO_PRIVATE_KEY); /* TODO: verify this inconsistency */
+      pkey = luna_load_rsa(NULL, &ctx, pub_handle, CKO_PRIVATE_KEY, 0); /* TODO: verify this inconsistency */
    } else {
-      pkey = luna_load_rsa(NULL, &ctx, priv_handle, CKO_PRIVATE_KEY);
+      pkey = luna_load_rsa(NULL, &ctx, priv_handle, CKO_PRIVATE_KEY, 0);
    }
 
    if (pkey == NULL) {
@@ -8971,7 +8976,7 @@ static int luna_dsa_keygen_ex(DSA *dsa, int flagSessionObject) {
       goto err;
    }
 
-   pkey = luna_load_dsa(NULL, &ctx, pub_handle, CKO_PUBLIC_KEY);
+   pkey = luna_load_dsa(NULL, &ctx, pub_handle, CKO_PUBLIC_KEY, 0);
    if (pkey == NULL) {
       LUNACA3err(LUNACA3_F_DSA_KEYGEN, LUNACA3_R_EENGINE);
       ERR_add_error_data(1, "luna_load_dsa");
@@ -10176,8 +10181,13 @@ static int luna_RAND_bytes(unsigned char *buf, int num) {
 static void luna_fixup_pkey_load(EVP_PKEY **ppkey, CK_ULONG ckKeyType, ENGINE *e, int hintPublic) {
    EVP_PKEY *pkey = (ppkey == NULL) ? NULL : *ppkey;
 
-   if (pkey == NULL || e == NULL)
+#ifdef LUNA_CONFIG_OSSL_PROVIDER
+   if (pkey == NULL)
       return;
+#else
+   if (pkey == NULL || e == NULL)
+       return;
+#endif
 
 #ifdef LUNA_OSSL3
    /* openssl3: downgrade the key to use legacy methods */
@@ -10480,7 +10490,7 @@ static int luna_ec_keygen_hw_ex(EC_KEY *dsa, int flagSessionObject, int flagDeri
       goto err;
    }
 
-   pkey = luna_load_ecdsa_FAST(NULL, &ctx, pub_handle, priv_handle);
+   pkey = luna_load_ecdsa_FAST(NULL, &ctx, pub_handle, priv_handle, 0);
    if (pkey == NULL) {
       LUNACA3err(LUNACA3_F_EC_GENERATE_KEY, LUNACA3_R_EENGINE);
       ERR_add_error_data(1, "luna_load_ecdsa");
