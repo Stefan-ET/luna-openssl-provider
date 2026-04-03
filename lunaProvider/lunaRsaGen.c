@@ -204,14 +204,14 @@ static int rsa_export(void *keydata, int selection,
     OSSL_PARAM_BLD *tmpl;
     OSSL_PARAM *params = NULL;
     int ok = 1;
+    int include_private = ((selection & OSSL_KEYMGMT_SELECT_PRIVATE_KEY) != 0);
+
+//    fprintf(stderr, "rsa_export selection=0x%x include_private=%d\n",
+//            selection, include_private);
+//    fflush(stderr);
 
     if (!luna_prov_is_running() || rsa == NULL)
         return 0;
-
-     // REFUSE to export private key - it's in the HSM
-    if ((selection & OSSL_KEYMGMT_SELECT_PRIVATE_KEY) != 0) {
-        return 0;  // Cannot export private key from HSM
-    }
 
     if ((selection & RSA_POSSIBLE_SELECTIONS) == 0)
         return 0;
@@ -223,21 +223,64 @@ static int rsa_export(void *keydata, int selection,
     if ((selection & OSSL_KEYMGMT_SELECT_OTHER_PARAMETERS) != 0)
         ok = ok && (ossl_rsa_pss_params_30_is_unrestricted(pss_params)
                     || ossl_rsa_pss_params_30_todata(pss_params, tmpl, NULL));
-    if ((selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY) != 0) {
-        // Only export public key components
-        ok = ok && ossl_rsa_todata(rsa, tmpl, NULL, 0);  // 0 = no private
+
+    if ((selection & OSSL_KEYMGMT_SELECT_KEYPAIR) != 0) {
+        ok = ok && ossl_rsa_todata(rsa, tmpl, NULL, include_private);
     }
 
-    if (!ok
-        || (params = OSSL_PARAM_BLD_to_param(tmpl)) == NULL)
+    if (!ok || (params = OSSL_PARAM_BLD_to_param(tmpl)) == NULL)
         goto err;
 
     ok = param_callback(params, cbarg);
     OSSL_PARAM_free(params);
+
 err:
     OSSL_PARAM_BLD_free(tmpl);
     return ok;
 }
+
+//static int rsa_export(void *keydata, int selection,
+//                      OSSL_CALLBACK *param_callback, void *cbarg)
+//{
+//    RSA *rsa = keydata;
+//    const RSA_PSS_PARAMS_30 *pss_params = ossl_rsa_get0_pss_params_30(rsa);
+//    OSSL_PARAM_BLD *tmpl;
+//    OSSL_PARAM *params = NULL;
+//    int ok = 1;
+//
+//    if (!luna_prov_is_running() || rsa == NULL)
+//        return 0;
+//
+//     // REFUSE to export private key - it's in the HSM
+//    if ((selection & OSSL_KEYMGMT_SELECT_PRIVATE_KEY) != 0) {
+//        return 0;  // Cannot export private key from HSM
+//    }
+//
+//    if ((selection & RSA_POSSIBLE_SELECTIONS) == 0)
+//        return 0;
+//
+//    tmpl = OSSL_PARAM_BLD_new();
+//    if (tmpl == NULL)
+//        return 0;
+//
+//    if ((selection & OSSL_KEYMGMT_SELECT_OTHER_PARAMETERS) != 0)
+//        ok = ok && (ossl_rsa_pss_params_30_is_unrestricted(pss_params)
+//                    || ossl_rsa_pss_params_30_todata(pss_params, tmpl, NULL));
+//    if ((selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY) != 0) {
+//        // Only export public key components
+//        ok = ok && ossl_rsa_todata(rsa, tmpl, NULL, 0);  // 0 = no private
+//    }
+//
+//    if (!ok
+//        || (params = OSSL_PARAM_BLD_to_param(tmpl)) == NULL)
+//        goto err;
+//
+//    ok = param_callback(params, cbarg);
+//    OSSL_PARAM_free(params);
+//err:
+//    OSSL_PARAM_BLD_free(tmpl);
+//    return ok;
+//}
 
 #ifdef FIPS_MODULE
 /* In fips mode there are no multi-primes. */
@@ -426,6 +469,9 @@ struct rsa_gen_ctx {
     size_t nbits;
     BIGNUM *pub_exp;
     size_t primes;
+    char *key_label;
+    char *key_auth;
+    int key_assign;
 
     /* For PSS */
     RSA_PSS_PARAMS_30 pss_params;
@@ -522,6 +568,25 @@ static int rsa_gen_set_params(void *genctx, const OSSL_PARAM params[])
     if ((p = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_RSA_E)) != NULL
         && !OSSL_PARAM_get_BN(p, &gctx->pub_exp))
         return 0;
+    if ((p = OSSL_PARAM_locate_const(params, LUNA_PROV_PKEY_PARAM_KEY_LABEL)) != NULL) {
+        if (p->data_type != OSSL_PARAM_UTF8_STRING)
+            return 0;
+        OPENSSL_free(gctx->key_label);
+        gctx->key_label = OPENSSL_strdup(p->data);
+        if (gctx->key_label == NULL)
+            return 0;
+    }
+    if ((p = OSSL_PARAM_locate_const(params, LUNA_PROV_PKEY_PARAM_KEY_AUTH)) != NULL) {
+        if (p->data_type != OSSL_PARAM_UTF8_STRING)
+            return 0;
+        OPENSSL_free(gctx->key_auth);
+        gctx->key_auth = OPENSSL_strdup(p->data);
+        if (gctx->key_auth == NULL)
+            return 0;
+    }
+    if ((p = OSSL_PARAM_locate_const(params, LUNA_PROV_PKEY_PARAM_KEY_ASSIGN)) != NULL
+        && !OSSL_PARAM_get_int(p, &gctx->key_assign))
+        return 0;
     /* Only attempt to get PSS parameters when generating an RSA-PSS key */
     if (gctx->rsa_type == RSA_FLAG_TYPE_RSASSAPSS
         && !pss_params_fromdata(&gctx->pss_params, &gctx->pss_defaults_set, params,
@@ -556,6 +621,9 @@ static const OSSL_PARAM *rsa_gen_settable_params(ossl_unused void *genctx,
 {
     static OSSL_PARAM settable[] = {
         rsa_gen_basic,
+        OSSL_PARAM_utf8_string(LUNA_PROV_PKEY_PARAM_KEY_LABEL, NULL, 0),
+        OSSL_PARAM_utf8_string(LUNA_PROV_PKEY_PARAM_KEY_AUTH, NULL, 0),
+        OSSL_PARAM_int(LUNA_PROV_PKEY_PARAM_KEY_ASSIGN, NULL),
         OSSL_PARAM_END
     };
 
@@ -568,6 +636,9 @@ static const OSSL_PARAM *rsapss_gen_settable_params(ossl_unused void *genctx,
     static OSSL_PARAM settable[] = {
         rsa_gen_basic,
         rsa_gen_pss,
+        OSSL_PARAM_utf8_string(LUNA_PROV_PKEY_PARAM_KEY_LABEL, NULL, 0),
+        OSSL_PARAM_utf8_string(LUNA_PROV_PKEY_PARAM_KEY_AUTH, NULL, 0),
+        OSSL_PARAM_int(LUNA_PROV_PKEY_PARAM_KEY_ASSIGN, NULL),
         OSSL_PARAM_END
     };
 
@@ -617,10 +688,14 @@ static void *rsa_gen(void *genctx, OSSL_CALLBACK *osslcb, void *cbarg)
 #endif
 
     LUNA_PRINTF(("RSA_generate_multi_prime_key\n"));
+    luna_prov_runtime_set(gctx->key_label, gctx->key_auth, gctx->key_assign);
     if (!luna_prov_RSA_generate_multi_prime_key(rsa_tmp,
                                       (int)gctx->nbits, (int)gctx->primes,
-                                      gctx->pub_exp, gencb))
+                                      gctx->pub_exp, gencb)) {
+        luna_prov_runtime_clear();
         goto err;
+    }
+    luna_prov_runtime_clear();
 
     if (!ossl_rsa_pss_params_30_copy(ossl_rsa_get0_pss_params_30(rsa_tmp),
                                      &gctx->pss_params))
@@ -648,6 +723,8 @@ static void rsa_gen_cleanup(void *genctx)
     gctx->acvp_test_params = NULL;
 #endif
     BN_clear_free(gctx->pub_exp);
+    OPENSSL_free(gctx->key_label);
+    OPENSSL_free(gctx->key_auth);
     OPENSSL_free(gctx);
 }
 

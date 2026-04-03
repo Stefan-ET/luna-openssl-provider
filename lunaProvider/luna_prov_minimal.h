@@ -48,6 +48,9 @@ enum luna_prov_flags_en {
 };
 
 #define LUNA_PROV_PKEY_PARAM_FLAGS "luna-prov-pkey-param-flags"
+#define LUNA_PROV_PKEY_PARAM_KEY_LABEL "luna-key-label"
+#define LUNA_PROV_PKEY_PARAM_KEY_AUTH "luna-key-auth"
+#define LUNA_PROV_PKEY_PARAM_KEY_ASSIGN "luna-key-assign"
 
 /* luna provider key bits */
 typedef struct luna_prov_key_bits_st {

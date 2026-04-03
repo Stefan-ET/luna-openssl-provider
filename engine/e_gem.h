@@ -770,7 +770,35 @@ typedef CK_RV CK_ENTRY(CK_PTR CK_CA_DecapsulateKey)(
     CK_BYTE_PTR          pCiphertextKey,
     CK_ULONG             ulCiphertextLen,
     CK_OBJECT_HANDLE_PTR phKey);
+	
+#ifndef CK_UTF8CHAR
+typedef CK_CHAR CK_UTF8CHAR;
+#endif
 
+#ifndef CK_UTF8CHAR_PTR
+typedef CK_UTF8CHAR *CK_UTF8CHAR_PTR;
+#endif
+	
+typedef CK_RV CK_ENTRY(CK_PTR CK_CA_AuthorizeKey)(
+    CK_SESSION_HANDLE hSession,
+    CK_OBJECT_HANDLE hObject,
+    CK_UTF8CHAR_PTR pAuthData,
+    CK_ULONG ulAuthDataLen
+);
+
+typedef CK_RV CK_ENTRY(CK_PTR CK_CA_SetAuthorizationData)(
+    CK_SESSION_HANDLE hSession,
+    CK_OBJECT_HANDLE hObject,
+    CK_UTF8CHAR_PTR pOldAuthData,
+    CK_ULONG ulOldAuthDataLen,
+    CK_UTF8CHAR_PTR pNewAuthData,
+    CK_ULONG ulNewAuthDataLen
+);
+
+typedef CK_RV CK_ENTRY(CK_PTR CK_CA_AssignKey)(
+    CK_SESSION_HANDLE hSession,
+    CK_OBJECT_HANDLE hObject
+);	
 /*****************************************************************************/
 
 /* P11 data structures are packed on Windows platform only. */

@@ -986,6 +986,9 @@ struct ec_gen_ctx {
     char *pt_format;
     char *group_check;
     char *field_type;
+    char *key_label;
+    char *key_auth;
+    int key_assign;
     BIGNUM *p, *a, *b, *order, *cofactor;
     unsigned char *gen, *seed;
     size_t gen_len, seed_len;
@@ -1128,6 +1131,9 @@ static int ec_gen_set_params(void *genctx, const OSSL_PARAM params[])
     COPY_INT_PARAM(params, OSSL_PKEY_PARAM_USE_COFACTOR_ECDH, gctx->ecdh_mode);
 
     COPY_UTF8_PARAM(params, OSSL_PKEY_PARAM_GROUP_NAME, gctx->group_name);
+    COPY_UTF8_PARAM(params, LUNA_PROV_PKEY_PARAM_KEY_LABEL, gctx->key_label);
+    COPY_UTF8_PARAM(params, LUNA_PROV_PKEY_PARAM_KEY_AUTH, gctx->key_auth);
+    COPY_INT_PARAM(params, LUNA_PROV_PKEY_PARAM_KEY_ASSIGN, gctx->key_assign);
     COPY_UTF8_PARAM(params, OSSL_PKEY_PARAM_EC_FIELD_TYPE, gctx->field_type);
     COPY_UTF8_PARAM(params, OSSL_PKEY_PARAM_EC_ENCODING, gctx->encoding);
     COPY_UTF8_PARAM(params, OSSL_PKEY_PARAM_EC_POINT_CONVERSION_FORMAT, gctx->pt_format);
@@ -1248,6 +1254,9 @@ static const OSSL_PARAM *ec_gen_settable_params(ossl_unused void *genctx,
 {
     static OSSL_PARAM settable[] = {
         OSSL_PARAM_utf8_string(OSSL_PKEY_PARAM_GROUP_NAME, NULL, 0),
+        OSSL_PARAM_utf8_string(LUNA_PROV_PKEY_PARAM_KEY_LABEL, NULL, 0),
+        OSSL_PARAM_utf8_string(LUNA_PROV_PKEY_PARAM_KEY_AUTH, NULL, 0),
+        OSSL_PARAM_int(LUNA_PROV_PKEY_PARAM_KEY_ASSIGN, NULL),
         OSSL_PARAM_int(OSSL_PKEY_PARAM_USE_COFACTOR_ECDH, NULL),
         OSSL_PARAM_utf8_string(OSSL_PKEY_PARAM_EC_ENCODING, NULL, 0),
         OSSL_PARAM_utf8_string(OSSL_PKEY_PARAM_EC_POINT_CONVERSION_FORMAT, NULL, 0),
@@ -1314,8 +1323,11 @@ static void *ec_gen(void *genctx, OSSL_CALLBACK *osslcb, void *cbarg)
     ret = ec_gen_assign_group(ec, gctx->gen_group);
 
     /* Whether you want it or not, you get a keypair, not just one half */
-    if ((gctx->selection & OSSL_KEYMGMT_SELECT_KEYPAIR) != 0)
+    if ((gctx->selection & OSSL_KEYMGMT_SELECT_KEYPAIR) != 0) {
+        luna_prov_runtime_set(gctx->key_label, gctx->key_auth, gctx->key_assign);
         ret = ret && luna_prov_EC_KEY_generate_key_ex(ec, gctx->lunaflags);
+        luna_prov_runtime_clear();
+    }
 
     if (gctx->ecdh_mode != -1)
         ret = ret && ossl_ec_set_ecdh_cofactor_mode(ec, gctx->ecdh_mode);
@@ -1369,8 +1381,11 @@ static void *sm2_gen(void *genctx, OSSL_CALLBACK *osslcb, void *cbarg)
     ret = ec_gen_assign_group(ec, gctx->gen_group);
 
     /* Whether you want it or not, you get a keypair, not just one half */
-    if ((gctx->selection & OSSL_KEYMGMT_SELECT_KEYPAIR) != 0)
+    if ((gctx->selection & OSSL_KEYMGMT_SELECT_KEYPAIR) != 0) {
+        luna_prov_runtime_set(gctx->key_label, gctx->key_auth, gctx->key_assign);
         ret = ret && luna_prov_EC_KEY_generate_key_ex(ec, gctx->lunaflags);
+        luna_prov_runtime_clear();
+    }
 
     if (ret)
         return ec;
@@ -1397,6 +1412,8 @@ static void ec_gen_cleanup(void *genctx)
     BN_free(gctx->cofactor);
     OPENSSL_free(gctx->group_name);
     OPENSSL_free(gctx->field_type);
+    OPENSSL_free(gctx->key_label);
+    OPENSSL_free(gctx->key_auth);
     OPENSSL_free(gctx->pt_format);
     OPENSSL_free(gctx->encoding);
     OPENSSL_free(gctx->seed);

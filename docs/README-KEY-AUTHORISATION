@@ -1,0 +1,333 @@
+This document is part of the "Luna OpenSSL for PQC" project and is provided under the MIT license.
+Copyright © 2024 Thales Group
+
+
+README-KEY-AUTHORISATION
+========================
+
+  The following notes describe how to use Key Authorisation with the
+  Luna OpenSSL provider / engine integration.
+
+  This README covers the runtime options added for HSM-backed key generation
+  and signing, and shows how to use them with RSA, ECDSA, and DSA keys.
+
+  The structure and style of this README follow the other documents in
+  the docs folder, such as README-RSA, README-ECDSA, README-DSA,
+  and README-GEM-CONFIG.
+
+  The Gem HSM middleware is configured according to file "README-GEM-CONFIG".
+
+
+OVERVIEW
+========
+
+  The implementation adds runtime key options for provider-based workflows:
+
+    - luna-key-label
+    - luna-key-auth
+    - luna-key-assign
+
+  These options are passed from the provider layer into the low-level Luna
+  engine / PKCS#11 path at runtime.
+
+  The sign / load path supports a pkcs11 URI form with runtime authorisation:
+
+    pkcs11:CKA_LABEL=<label>;luna-auth=<auth-mode>
+
+  Supported authorisation modes are:
+
+    prompt
+    password:<plaintext>
+    passenv:<ENVVAR>
+    none
+
+  The passenv form is the preferred non-interactive option for scripts.
+
+
+WHAT CHANGED
+============
+
+  1. Key generation can now receive the key label, key authorisation mode,
+     and key assign flag through provider keygen parameters instead of using
+     dedicated environment toggles.
+
+  2. Signing / key loading can now receive authorisation information through
+     the pkcs11 URI using the luna-auth component.
+
+  3. RSA key generation was updated so the generated public key metadata is
+     propagated correctly for HSM-backed usage.
+
+  4. DSA key generation was updated so:
+
+       - provider runtime options are handed down to the low-level HSM path;
+       - missing domain parameters are generated when required;
+       - EnableDsaGenKeyPair is honored for HSM-backed key generation.
+
+  5. The password handling model is now centered on the runtime auth string.
+     The special env-based form that remains supported is:
+
+       passenv:<ENVVAR>
+
+     This means that the environment variable is used only as the source for
+     the password value, not as a separate legacy control mechanism.
+
+
+PREREQUISITES
+=============
+
+  1. Ensure that the correct Luna configuration file is being used.
+
+     On Windows the configuration file is typically:
+
+       %ChrystokiConfigurationPath%\crystoki.ini
+
+     or, if the environment variable is not set, the default location used
+     by the engine / provider path.
+
+  2. Configure GemEngine according to README-GEM-CONFIG.
+
+  3. Enable the required HSM key generation paths as needed:
+
+	[GemEngine]
+	LibPath=C:\Program Files\SafeNet\LunaClient\cryptoki.dll
+	LibPath64=C:\Program Files\SafeNet\LunaClient\cryptoki.dll
+	EnableEcGenKeyPair=1
+	EnableRsaGenKeyPair=1
+	EnableDsaGenKeyPair=1
+	EnableLoadPubKey=1
+	EnableLoadPrivKey=1
+	EnableLoginInit=1
+	DisableCheckFinalize=1
+	DisableRand=0
+	DisableEcdsa=0
+	DisableDsa=0
+	EngineInit="LunaSA7-Partition_name":0:0:passfile=C:\temp\pass1.txt
+	#EngineInit="LunaSA7-Partition_name":0:0:passdev=console
+
+
+  4. Load both the default provider and the luna provider.
+
+  5. Use meaningful labels.  In all examples below, labels are intentionally
+     longer than very short test names.
+
+
+KEY AUTHORISATION OPTIONS
+=========================
+
+  TABLE 1. KEYGEN OPTIONS
+
+  OPTION NAME         EXAMPLE VALUE                    PURPOSE
+  ------------------  -------------------------------  -------------------------------------------
+  luna-key-label      TESTLABEL1                       HSM key label used during key generation
+  luna-key-auth       prompt                           Prompt for key auth data
+  luna-key-auth       password:12345678                Use inline plaintext auth data
+  luna-key-auth       passenv:MY_LUNA_PASS             Read auth data from environment variable
+  luna-key-auth       none                             Do not apply key auth data
+  luna-key-assign     1                                Call key-assign after key generation
+
+
+  TABLE 2. SIGN / LOAD URI OPTIONS
+
+  URI COMPONENT       EXAMPLE VALUE                    PURPOSE
+  ------------------  -------------------------------  -------------------------------------------
+  CKA_LABEL           TESTLABEL1                       Find key by CKA_LABEL
+  luna-auth           prompt                           Prompt for key auth data before sign / use
+  luna-auth           password:12345678                Use inline plaintext auth data
+  luna-auth           passenv:MY_LUNA_PASS             Read auth data from environment variable
+  luna-auth           none                             Do not apply key auth data
+
+
+GENERAL RULES
+=============
+
+  1. KEYGEN uses -pkeyopt:
+
+       -pkeyopt luna-key-label:<label>
+       -pkeyopt luna-key-auth:<mode>
+       -pkeyopt luna-key-assign:1
+
+  2. SIGN uses pkcs11 URI syntax in -inkey:
+
+       -inkey "pkcs11:CKA_LABEL=<label>;luna-auth=<mode>"
+
+  3. The assign option applies to KEYGEN only.
+
+  4. The password:<value> form is useful for quick testing, but it exposes
+     the secret in command history and process listings.
+
+  5. The passenv:<ENVVAR> form is recommended for scripted use.
+
+  6. The prompt form is recommended for interactive use.
+
+
+EXAMPLES
+========
+
+EXAMPLE 1. RSA key generation with interactive key authorisation.
+
+  C:\openssl-3.3.2\bin\openssl.exe genpkey ^
+    -provider default -provider lunaprov ^
+    -propquery "?provider=lunaprov" ^
+    -algorithm RSA ^
+    -pkeyopt bits:4096 ^
+    -pkeyopt luna-key-label:TESTLABEL1 ^
+    -pkeyopt luna-key-auth:prompt ^
+    -out NUL
+
+
+EXAMPLE 2. RSA key generation with inline authorisation and assign.
+
+  C:\openssl-3.3.2\bin\openssl.exe genpkey ^
+    -provider default -provider lunaprov ^
+    -propquery "?provider=lunaprov" ^
+    -algorithm RSA ^
+    -pkeyopt bits:3072 ^
+    -pkeyopt luna-key-label:TESTLABEL2 ^
+    -pkeyopt luna-key-auth:password:12345678 ^
+    -pkeyopt luna-key-assign:1 ^
+    -out NUL
+
+
+EXAMPLE 3. EC key generation with passenv.
+
+  set MY_LUNA_PASS=12345678
+
+  C:\openssl-3.3.2\bin\openssl.exe genpkey ^
+    -provider default -provider lunaprov ^
+    -propquery "?provider=lunaprov" ^
+    -algorithm EC ^
+    -pkeyopt ec_paramgen_curve:P-384 ^
+    -pkeyopt ec_param_enc:named_curve ^
+    -pkeyopt luna-key-label:TESTLABEL3 ^
+    -pkeyopt luna-key-auth:passenv:MY_LUNA_PASS ^
+    -out NUL
+
+
+EXAMPLE 4. DSA key generation with runtime key authorisation.
+
+  C:\openssl-3.3.2\bin\openssl.exe genpkey ^
+    -provider default -provider lunaprov ^
+    -propquery "?provider=lunaprov" ^
+    -algorithm DSA ^
+    -pkeyopt type:fips186_4 ^
+    -pkeyopt pbits:2048 ^
+    -pkeyopt qbits:224 ^
+    -pkeyopt luna-key-label:TESTLABEL4 ^
+    -pkeyopt luna-key-auth:password:12345678 ^
+    -out 1.bin
+
+  NOTE: For DSA, domain parameters may be generated first and then the
+        keypair is created in the HSM-backed path.
+
+
+EXAMPLE 5. RSA signing with pkcs11 URI and prompt.
+
+  C:\openssl-3.3.2\bin\openssl.exe pkeyutl ^
+    -provider default -provider lunaprov ^
+    -propquery "?provider=lunaprov" ^
+    -sign ^
+    -inkey "pkcs11:CKA_LABEL=TESTLABEL1;luna-auth=prompt" ^
+    -rawin -digest sha256 ^
+    -in data.txt ^
+    -out sig.bin
+
+
+EXAMPLE 6. RSA signing with pkcs11 URI and passenv.
+
+  set MY_LUNA_PASS=12345678
+
+  C:\openssl-3.3.2\bin\openssl.exe pkeyutl ^
+    -provider default -provider lunaprov ^
+    -propquery "?provider=lunaprov" ^
+    -sign ^
+    -inkey "pkcs11:CKA_LABEL=TESTLABEL2;luna-auth=passenv:MY_LUNA_PASS" ^
+    -rawin -digest sha256 ^
+    -in data.txt ^
+    -out sig.bin
+
+
+EXAMPLE 7. ECDSA signing with pkcs11 URI and prompt.
+
+  C:\openssl-3.3.2\bin\openssl.exe pkeyutl ^
+    -provider default -provider lunaprov ^
+    -propquery "?provider=lunaprov" ^
+    -sign ^
+    -inkey "pkcs11:CKA_LABEL=TESTLABEL3;luna-auth=prompt" ^
+    -rawin -digest sha256 ^
+    -in data.txt ^
+    -out sig.bin
+
+
+EXAMPLE 8. DSA signing with pkcs11 URI and inline authorisation.
+
+  C:\openssl-3.3.2\bin\openssl.exe pkeyutl ^
+    -provider default -provider lunaprov ^
+    -propquery "?provider=lunaprov" ^
+    -sign ^
+    -inkey "pkcs11:CKA_LABEL=TESTLABEL4;luna-auth=password:12345678" ^
+    -rawin -digest sha256 ^
+    -in data.txt ^
+    -out sig.bin
+
+
+EXAMPLE 9. Sign without additional key auth data.
+
+  C:\openssl-3.3.2\bin\openssl.exe pkeyutl ^
+    -provider default -provider lunaprov ^
+    -propquery "?provider=lunaprov" ^
+    -sign ^
+    -inkey "pkcs11:CKA_LABEL=TESTLABEL3;luna-auth=none" ^
+    -rawin -digest sha256 ^
+    -in data.txt ^
+    -out sig.bin
+
+
+SECURITY NOTES
+==============
+
+  1. Use prompt or passenv wherever possible.
+
+  2. Avoid password:<value> in production scripts because the value may be
+     exposed through shell history, process listings, logs, or screenshots.
+
+  3. The generated PEM / PKCS#8 output for HSM-backed keys may be a provider /
+     engine surrogate representation and should not be treated as an exported
+     real private key from the HSM unless explicitly validated otherwise.
+
+  4. Key authorisation and key assign behavior depend on partition policy,
+     firmware behavior, and the available Luna PKCS#11 extension functions.
+
+
+TROUBLESHOOTING
+===============
+
+  1. If key generation unexpectedly happens in software, verify the GemEngine
+     settings in crystoki.ini / Chrystoki.conf.
+
+  2. For DSA HSM key generation, confirm that:
+
+       EnableDsaGenKeyPair = 1
+
+     is set in the [GemEngine] section.
+
+  3. If the provider does not appear to use your latest build, verify the
+     provider module path and the OPENSSL_MODULES setting.
+
+  4. If using passenv:<ENVVAR>, confirm that the environment variable is set
+     in the same shell session before running OpenSSL.
+
+  5. If signing fails, verify the exact label and ensure that the referenced
+     HSM key exists under that label.
+
+
+RELATED DOCUMENTS
+=================
+
+  README-GEM-CONFIG
+  README-RSA
+  README-ECDSA
+  README-DSA
+
+
+This document is part of the "Luna OpenSSL for PQC" project and is provided under the MIT license.
+Copyright © 2024 Thales Group

@@ -158,6 +158,8 @@ int luna_prov_rsa_priv_dec_x509(void *xparams, int flen, const unsigned char *fr
 
 /* EC wrapper functions */
 int luna_prov_EC_KEY_generate_key_ex(EC_KEY *key, int lunaflags);
+int luna_prov_runtime_set(const char *label, const char *auth, int assign);
+void luna_prov_runtime_clear(void);
 int luna_prov_ECDSA_sign_ex(int type, const unsigned char *dgst, int dlen,
                   unsigned char *sig, unsigned int *siglen, const BIGNUM *kinv,
                   const BIGNUM *r, EC_KEY *eckey);

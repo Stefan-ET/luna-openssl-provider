@@ -62,6 +62,9 @@ struct dsa_gen_ctx {
     int hindex;
     char *mdname;
     char *mdprops;
+    char *key_label;
+    char *key_auth;
+    int key_assign;
     OSSL_CALLBACK *cb;
     void *cbarg;
 };
@@ -548,6 +551,27 @@ static int luna_dsa_gen_set_params(void *genctx, const OSSL_PARAM params[])
         if (gctx->mdprops == NULL)
             goto err;
     }
+    p = OSSL_PARAM_locate_const(params, LUNA_PROV_PKEY_PARAM_KEY_LABEL);
+    if (p != NULL) {
+        if (p->data_type != OSSL_PARAM_UTF8_STRING)
+            goto err;
+        OPENSSL_free(gctx->key_label);
+        gctx->key_label = OPENSSL_strdup(p->data);
+        if (gctx->key_label == NULL)
+            goto err;
+    }
+    p = OSSL_PARAM_locate_const(params, LUNA_PROV_PKEY_PARAM_KEY_AUTH);
+    if (p != NULL) {
+        if (p->data_type != OSSL_PARAM_UTF8_STRING)
+            goto err;
+        OPENSSL_free(gctx->key_auth);
+        gctx->key_auth = OPENSSL_strdup(p->data);
+        if (gctx->key_auth == NULL)
+            goto err;
+    }
+    p = OSSL_PARAM_locate_const(params, LUNA_PROV_PKEY_PARAM_KEY_ASSIGN);
+    if (p != NULL && !OSSL_PARAM_get_int(p, &gctx->key_assign))
+        goto err;
     return 1;
 
     err:
@@ -571,6 +595,9 @@ static const OSSL_PARAM *luna_dsa_gen_settable_params(ossl_unused void *genctx,
         OSSL_PARAM_octet_string(OSSL_PKEY_PARAM_FFC_SEED, NULL, 0),
         OSSL_PARAM_int(OSSL_PKEY_PARAM_FFC_PCOUNTER, NULL),
         OSSL_PARAM_int(OSSL_PKEY_PARAM_FFC_H, NULL),
+        OSSL_PARAM_utf8_string(LUNA_PROV_PKEY_PARAM_KEY_LABEL, NULL, 0),
+        OSSL_PARAM_utf8_string(LUNA_PROV_PKEY_PARAM_KEY_AUTH, NULL, 0),
+        OSSL_PARAM_int(LUNA_PROV_PKEY_PARAM_KEY_ASSIGN, NULL),
         OSSL_PARAM_END
     };
     LUNA_PRINTF(("\n"));
@@ -646,11 +673,22 @@ static void *luna_dsa_gen(void *genctx, OSSL_CALLBACK *osslcb, void *cbarg)
     if ((gctx->selection & OSSL_KEYMGMT_SELECT_KEYPAIR) != 0) {
         if (ffc->p == NULL
             || ffc->q == NULL
-            || ffc->g == NULL)
+            || ffc->g == NULL) {
+            if (ossl_dsa_generate_ffc_parameters(dsa, gctx->gen_type,
+                                                 gctx->pbits, gctx->qbits,
+                                                 gencb) <= 0)				
             goto end;
+		}
         LUNA_PRINTF(("DSA_generate_key\n"));
-        if (luna_prov_DSA_generate_key(dsa) <= 0)
+		
+		if (!luna_prov_runtime_set(gctx->key_label, gctx->key_auth, gctx->key_assign))
+			goto end;
+	
+        if (luna_prov_DSA_generate_key(dsa) <= 0) {
+			luna_prov_runtime_clear();
             goto end;
+		}
+		luna_prov_runtime_clear();
     }
     ret = 1;
 end:
@@ -672,6 +710,8 @@ static void luna_dsa_gen_cleanup(void *genctx)
 
     OPENSSL_free(gctx->mdname);
     OPENSSL_free(gctx->mdprops);
+    OPENSSL_free(gctx->key_label);
+    OPENSSL_free(gctx->key_auth);
     OPENSSL_clear_free(gctx->seed, gctx->seedlen);
     OPENSSL_free(gctx);
 }

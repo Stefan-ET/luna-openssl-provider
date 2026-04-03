@@ -212,22 +212,68 @@ static void *file_open_dir(const char *path, const char *uri, void *provctx)
     return NULL;
 }
 
+static char *luna_pkcs11_strip_runtime_opts(const char *uri, char **auth_out)
+{
+    char *dup = NULL;
+    char *p = NULL;
+
+    if (auth_out != NULL)
+        *auth_out = NULL;
+    if (uri == NULL)
+        return NULL;
+
+    dup = OPENSSL_strdup(uri);
+    if (dup == NULL)
+        return NULL;
+
+    p = strstr(dup, ";luna-auth=");
+    if (p != NULL) {
+        char *value = p + strlen(";luna-auth=");
+        *p = '\0';
+        if (auth_out != NULL && value[0] != '\0') {
+            *auth_out = OPENSSL_strdup(value);
+            if (*auth_out == NULL) {
+                OPENSSL_free(dup);
+                return NULL;
+            }
+        }
+    }
+
+    return dup;
+}
+
 static struct file_ctx_st *file_open_pkcs11(const char *uri,
                                             void *provctx)
 {
     struct file_ctx_st *ctx;
+    char *auth = NULL;
+    char *search_uri = NULL;
 
     LUNA_PRINTF(("\n"));
-    if ((ctx = new_file_ctx(IS_PKCS11, uri, provctx)) == NULL) {
+    luna_prov_runtime_clear();
+    search_uri = luna_pkcs11_strip_runtime_opts(uri, &auth);
+    if (search_uri == NULL) {
         ERR_raise(ERR_LIB_PROV, ERR_R_PROV_LIB);
         goto err;
     }
-    if ( (ctx->_.pkcs11.find_ctx = LUNA_FIND_CTX_new(uri)) == NULL ) {
+    if (!luna_prov_runtime_set(NULL, auth, 0)) {
         ERR_raise(ERR_LIB_PROV, ERR_R_PROV_LIB);
         goto err;
     }
+    if ((ctx = new_file_ctx(IS_PKCS11, search_uri, provctx)) == NULL) {
+        ERR_raise(ERR_LIB_PROV, ERR_R_PROV_LIB);
+        goto err;
+    }
+    if ( (ctx->_.pkcs11.find_ctx = LUNA_FIND_CTX_new(search_uri)) == NULL ) {
+        ERR_raise(ERR_LIB_PROV, ERR_R_PROV_LIB);
+        goto err;
+    }
+    OPENSSL_free(auth);
+    OPENSSL_free(search_uri);
     return ctx;
  err:
+    OPENSSL_free(auth);
+    OPENSSL_free(search_uri);
     free_file_ctx(ctx);
     return NULL;
 }

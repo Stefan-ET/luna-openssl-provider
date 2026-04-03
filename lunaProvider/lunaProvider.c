@@ -1254,6 +1254,7 @@ static const OSSL_ALGORITHM luna_decoder[] = {
 
 static const OSSL_ALGORITHM luna_store[] = {
     { "file", LUNA_PROV_EQUALS_SZ, luna_file_store_functions },
+	{ "pkcs11", LUNA_PROV_EQUALS_SZ, luna_file_store_functions },
     { NULL, NULL, NULL }
 };
 

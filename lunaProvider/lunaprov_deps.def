@@ -311,13 +311,13 @@ EXPORTS
   ossl_ecx_dhkem_derive_private
 
 ; removed since 3.4.1
-;  ossl_digest_get_approved_nid_with_sha1
-;  ossl_digest_is_allowed
-;  ossl_ec_check_key
-;  ossl_rsa_check_key
+  ossl_digest_get_approved_nid_with_sha1
+  ossl_digest_is_allowed
+  ossl_ec_check_key
+  ossl_rsa_check_key
 
 ; added since 3.4.1
-ossl_rsa_check_key_size
-ossl_ec_check_security_strength
-ossl_digest_get_approved_nid
+;ossl_rsa_check_key_size
+;ossl_ec_check_security_strength
+;ossl_digest_get_approved_nid
 

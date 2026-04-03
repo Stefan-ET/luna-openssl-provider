@@ -353,6 +353,21 @@ typedef struct luna_oaep_params_st {
 static int luna_rsa_priv_dec_x509(luna_oaep_params *oaep_params, int flen, const unsigned char *from, size_t tolen, unsigned char *to, RSA *rsa, int padding);
 static char *luna_strncpy(char *dest, const char *src, size_t n);
 
+static int luna_get_env_value(const char *env_name, char *buf, size_t buflen);
+typedef struct luna_runtime_opts_st {
+    int active;
+    int assign;
+    char label[81];
+    char auth[256];
+} luna_runtime_opts_t;
+static void luna_runtime_opts_clear(void);
+static int luna_runtime_opts_set(const char *label, const char *auth, int assign);
+static int luna_runtime_get_label(char *buf, size_t buflen);
+static int luna_pka_get_pass(char *buf, size_t buflen, CK_ULONG *outlen);
+static CK_RV luna_pka_post_keygen(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hPriv);
+static CK_RV luna_pka_authorize_for_sign(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hPriv);
+static int luna_prompt_hidden(const char *prompt, char *buf, size_t buflen, CK_ULONG *outlen);
+
 #ifdef LUNA_RSA_USE_EVP_PKEY_METHS
 static int luna_rsa_sign(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *siglen, const unsigned char *tbs, size_t tbslen);
 static int luna_rsa_decrypt(EVP_PKEY_CTX *ctx, unsigned char *out, size_t *outlen, const unsigned char *in, size_t inlen);
@@ -460,6 +475,38 @@ static CK_RV STUB_CA_DecapsulateKey(
     CK_BYTE_PTR          pCiphertextKey,
     CK_ULONG             ulCiphertextLen,
     CK_OBJECT_HANDLE_PTR phKey) {
+    return CKR_FUNCTION_NOT_SUPPORTED;
+}
+
+#ifndef CK_UTF8CHAR
+typedef CK_CHAR CK_UTF8CHAR;
+#endif
+
+#ifndef CK_UTF8CHAR_PTR
+typedef CK_UTF8CHAR *CK_UTF8CHAR_PTR;
+#endif
+
+static CK_RV STUB_CA_AuthorizeKey(
+	CK_SESSION_HANDLE hSession,
+    CK_OBJECT_HANDLE hObject,
+    CK_UTF8CHAR_PTR pAuthData,
+    CK_ULONG ulAuthDataLen) {
+    return CKR_FUNCTION_NOT_SUPPORTED;
+}
+
+static CK_RV STUB_CA_SetAuthorizationData(
+	CK_SESSION_HANDLE hSession,
+    CK_OBJECT_HANDLE hObject,
+    CK_UTF8CHAR_PTR pOldAuthData,
+    CK_ULONG ulOldAuthDataLen,
+    CK_UTF8CHAR_PTR pNewAuthData,
+    CK_ULONG ulNewAuthDataLen) {
+    return CKR_FUNCTION_NOT_SUPPORTED;
+}
+
+static CK_RV STUB_CA_AssignKey(
+	CK_SESSION_HANDLE hSession,
+	CK_OBJECT_HANDLE hObject) {
     return CKR_FUNCTION_NOT_SUPPORTED;
 }
 
@@ -762,8 +809,13 @@ static struct {
       CK_CA_DeriveKeyAndWrap CA_DeriveKeyAndWrap;
       CK_CA_EncapsulateKey CA_EncapsulateKey;
       CK_CA_DecapsulateKey CA_DecapsulateKey;
+	  
+	  CK_CA_AuthorizeKey CA_AuthorizeKey;
+      CK_CA_SetAuthorizationData CA_SetAuthorizationData;
+      CK_CA_AssignKey CA_AssignKey;
    } ext;
-} p11 = {0, 0, {0, 0, 0, 0, 0, 0}};
+} p11 = {0, 0, {0, 0, 0, 0, 0, 0, 0, 0, 0}};
+
 
 /* Saved function pointers */
 static int (*saved_rsa_pub_dec)(int flen, const unsigned char *from, unsigned char *to, RSA *rsa, int padding) = NULL;
@@ -1525,6 +1577,9 @@ static int luna_load_p11(void) {
       p11.ext.CA_DeriveKeyAndWrap = (CK_CA_DeriveKeyAndWrap)luna_dso_bind_func(luna_dso, "CA_DeriveKeyAndWrap");
       p11.ext.CA_EncapsulateKey = (CK_CA_EncapsulateKey)luna_dso_bind_func(luna_dso, "CA_EncapsulateKey");
       p11.ext.CA_DecapsulateKey = (CK_CA_DecapsulateKey)luna_dso_bind_func(luna_dso, "CA_DecapsulateKey");
+	  p11.ext.CA_AuthorizeKey = (CK_CA_AuthorizeKey)luna_dso_bind_func(luna_dso, "CA_AuthorizeKey");
+	  p11.ext.CA_SetAuthorizationData = (CK_CA_SetAuthorizationData)luna_dso_bind_func(luna_dso, "CA_SetAuthorizationData");
+	  p11.ext.CA_AssignKey = (CK_CA_AssignKey)luna_dso_bind_func(luna_dso, "CA_AssignKey");
    } else if (!luna_pa_check_lib()) {
       p11.C_GetFunctionList = (CK_C_GetFunctionList)luna_dso_bind_func(luna_dso, "P11Wrap_GetFunctionList");
       p11.ext.CA_SetApplicationID = (CK_CA_SetApplicationID)luna_dso_bind_func(luna_dso, "P11Wrap_SetApplicationID");
@@ -1536,6 +1591,10 @@ static int luna_load_p11(void) {
       p11.ext.CA_DeriveKeyAndWrap = (CK_CA_DeriveKeyAndWrap)luna_dso_bind_func(luna_dso, "P11Wrap_DeriveKeyAndWrap");
       p11.ext.CA_EncapsulateKey = (CK_CA_EncapsulateKey)luna_dso_bind_func(luna_dso, "P11Wrap_EncapsulateKey");
       p11.ext.CA_DecapsulateKey = (CK_CA_DecapsulateKey)luna_dso_bind_func(luna_dso, "P11Wrap_DecapsulateKey");
+
+	  p11.ext.CA_AuthorizeKey = (CK_CA_AuthorizeKey)luna_dso_bind_func(luna_dso, "P11Wrap_AuthorizeKey");
+	  p11.ext.CA_SetAuthorizationData = (CK_CA_SetAuthorizationData)luna_dso_bind_func(luna_dso, "P11Wrap_SetAuthorizationData");
+	  p11.ext.CA_AssignKey = (CK_CA_AssignKey)luna_dso_bind_func(luna_dso, "P11Wrap_AssignKey");
    }
 
    if (p11.C_GetFunctionList == NULL) {
@@ -1580,6 +1639,18 @@ static int luna_load_p11(void) {
    if (p11.ext.CA_DecapsulateKey == NULL) {
       p11.ext.CA_DecapsulateKey = STUB_CA_DecapsulateKey;
    }
+   
+   if (p11.ext.CA_AuthorizeKey == NULL) {
+      p11.ext.CA_AuthorizeKey = STUB_CA_AuthorizeKey;
+   }   
+
+   if (p11.ext.CA_SetAuthorizationData == NULL) {
+      p11.ext.CA_SetAuthorizationData = STUB_CA_SetAuthorizationData;
+   }   
+
+   if (p11.ext.CA_AssignKey == NULL) {
+      p11.ext.CA_AssignKey = STUB_CA_AssignKey;
+   }   
 
    retCode = p11.C_GetFunctionList(&p11.std);
    if (retCode != CKR_OK) {
@@ -3200,6 +3271,14 @@ static int luna_rsa_priv_enc_pkcs(luna_pss_params *pss_params, int flen, const u
       }
 
    } else {
+      retCode = luna_pka_authorize_for_sign(ctx.hSession, privKeyHandle);
+      if (retCode != CKR_OK) {
+         LUNACA3err(LUNACA3_F_RSA_PRIVATE_ENCRYPT, LUNACA3_R_EPKCS11);
+         ERR_add_error_data(2, "CA_AuthorizeKey=0x", luna_itoa(itoabuf, retCode));
+         LUNA_ERRORLOGL(LUNA_FUNC_NAME ": CA_AuthorizeKey", retCode);
+         goto err;
+      }	   
+	   
       retCode = p11.std->C_SignInit(ctx.hSession, &rsa_mechanism, privKeyHandle);
       if (retCode != CKR_OK) {
          LUNACA3err(LUNACA3_F_RSA_PRIVATE_ENCRYPT, LUNACA3_R_EPKCS11);
@@ -3962,6 +4041,14 @@ static DSA_SIG *luna_dsa_do_sign(const unsigned char *dgst, int dlen, DSA *dsa) 
    }
 
    /* SignInit */
+   retCode = luna_pka_authorize_for_sign(ctx.hSession, priv_handle);
+   if (retCode != CKR_OK) {
+      LUNACA3err(LUNACA3_F_DSA_SIGN, LUNACA3_R_EPKCS11);
+      ERR_add_error_data(2, "CA_AuthorizeKey=0x", luna_itoa(itoabuf, retCode));
+      LUNA_ERRORLOGL(LUNA_FUNC_NAME ": CA_AuthorizeKey", retCode);
+      goto err;
+   }   
+   
    retCode = p11.std->C_SignInit(ctx.hSession, &dsa_pkcs_mechanism, priv_handle);
    if (retCode != CKR_OK) {
       LUNACA3err(LUNACA3_F_DSA_SIGN, LUNACA3_R_EPKCS11);
@@ -8050,6 +8137,15 @@ static ECDSA_SIG *luna_ecdsa_do_sign(const unsigned char *dgst, int dlen, const 
    mech.mechanism = CKM_ECDSA;
    mech.pParameter = NULL_PTR;
    mech.ulParameterLen = 0;
+   
+   rv = luna_pka_authorize_for_sign(ctx.hSession, priv_handle);
+   if (rv != CKR_OK) {
+      LUNACA3err(LUNACA3_F_ECDSA_SIGN, LUNACA3_R_EPKCS11);
+      ERR_add_error_data(2, "CA_AuthorizeKey(ECDSA)=0x", luna_itoa(itoabuf, rv));
+      LUNA_ERRORLOGL(LUNA_FUNC_NAME ": CA_AuthorizeKey(ECDSA)", rv);
+      goto err;
+   }
+   
    rv = p11.std->C_SignInit(ctx.hSession, &mech, priv_handle);
    if (rv != CKR_OK) {
       LUNACA3err(LUNACA3_F_ECDSA_SIGN, LUNACA3_R_EPKCS11);
@@ -8485,8 +8581,8 @@ static int luna_rsa_keygen_ex(RSA *rsa, int bits, BIGNUM *e, BN_GENCB *cb,
    EVP_PKEY *pkey = NULL;
    /*CK_BBOOL bFalse = 0;*/
    CK_BBOOL bTrue = CK_TRUE;
-   CK_BBOOL bModifiable = CK_TRUE;
-   CK_BBOOL bExtractable = CK_TRUE;
+   CK_BBOOL bModifiable = CK_FALSE;
+   CK_BBOOL bExtractable = CK_FALSE;
    CK_BBOOL bTokenObject = (flagSessionObject ? CK_FALSE : CK_TRUE);
 
    CK_OBJECT_HANDLE priv_handle = LUNA_INVALID_HANDLE;
@@ -8561,17 +8657,27 @@ static int luna_rsa_keygen_ex(RSA *rsa, int bits, BIGNUM *e, BN_GENCB *cb,
    if (luna_SHA1(bufTemp, sizeof(bufTemp), bufId) != 1) {
       goto err;
    }
+   
+   char envLabel[sizeof(bufLabelPrivate)];
+   if (luna_runtime_get_label(envLabel, sizeof(envLabel))) {
+	  luna_strncpy(bufLabelPrivate, envLabel, sizeof(bufLabelPrivate));
+	  luna_strncpy(bufLabelPublic, envLabel, sizeof(bufLabelPublic));
 
-   if (luna_pa_check_lib()) {
-      luna_strncpy(bufLabelPublic, "rsa-", sizeof(bufLabelPublic));
-      (void)luna_sprintf_hex(&bufLabelPublic[4], bufId, sizeof(bufId));
-      luna_strncpy(bufLabelPrivate, "rsa-", sizeof(bufLabelPrivate));
-      (void)luna_sprintf_hex(&bufLabelPrivate[4], bufId, sizeof(bufId));
+	  if (strlen(bufLabelPublic) + 4 < sizeof(bufLabelPublic)) {
+		 strcat(bufLabelPublic, "-pub");
+	  }
    } else {
-      luna_strncpy(bufLabelPublic, "rsa-public-", sizeof(bufLabelPublic));
-      (void)luna_sprintf_hex(&bufLabelPublic[11], bufId, sizeof(bufId));
-      luna_strncpy(bufLabelPrivate, "rsa-private-", sizeof(bufLabelPrivate));
-      (void)luna_sprintf_hex(&bufLabelPrivate[12], bufId, sizeof(bufId));
+	   if (luna_pa_check_lib()) {
+		  luna_strncpy(bufLabelPublic, "rsa-", sizeof(bufLabelPublic));
+		  (void)luna_sprintf_hex(&bufLabelPublic[4], bufId, sizeof(bufId));
+		  luna_strncpy(bufLabelPrivate, "rsa-", sizeof(bufLabelPrivate));
+		  (void)luna_sprintf_hex(&bufLabelPrivate[4], bufId, sizeof(bufId));
+	   } else {
+		  luna_strncpy(bufLabelPublic, "rsa-public-", sizeof(bufLabelPublic));
+		  (void)luna_sprintf_hex(&bufLabelPublic[11], bufId, sizeof(bufId));
+		  luna_strncpy(bufLabelPrivate, "rsa-private-", sizeof(bufLabelPrivate));
+		  (void)luna_sprintf_hex(&bufLabelPrivate[12], bufId, sizeof(bufId));
+	   }
    }
 
    /* set exponent */
@@ -8632,6 +8738,7 @@ static int luna_rsa_keygen_ex(RSA *rsa, int bits, BIGNUM *e, BN_GENCB *cb,
       luna_ckatab_replace(pub_template, LUNA_DIM(pub_template), CKA_PUBLIC_EXPONENT, (CK_BYTE_PTR)bufTemp, ulTemp);
       luna_ckatab_replace(pub_template, LUNA_DIM(pub_template), CKA_LABEL, (CK_BYTE_PTR)bufLabelPublic,
                           (CK_ULONG)strlen(bufLabelPublic));
+	  luna_ckatab_replace(pub_template, LUNA_DIM(pub_template), CKA_ID, bufId, sizeof(bufId));						  
 
       /* fill template (priv) */
       luna_ckatab_replace(priv_template, LUNA_DIM(priv_template), CKA_LABEL, (CK_BYTE_PTR)bufLabelPrivate,
@@ -8672,6 +8779,14 @@ static int luna_rsa_keygen_ex(RSA *rsa, int bits, BIGNUM *e, BN_GENCB *cb,
       LUNA_ERRORLOGL(LUNA_FUNC_NAME ": C_GenerateKeyPair", retCode);
       goto err;
    }
+   
+   retCode = luna_pka_post_keygen(ctx.hSession, priv_handle);
+   if (retCode != CKR_OK) {
+	  LUNACA3err(LUNACA3_F_RSA_KEYGEN, LUNACA3_R_EPKCS11);
+	  ERR_add_error_data(2, "CA_SetAuthorizationData=0x", luna_itoa(itoabuf, retCode));
+	  LUNA_ERRORLOGL(LUNA_FUNC_NAME ": CA_SetAuthorizationData", retCode);
+	  goto err;
+   }   
 
    if (luna_pa_check_lib()) {
       pkey = luna_load_rsa(NULL, &ctx, pub_handle, CKO_PRIVATE_KEY, 0); /* TODO: verify this inconsistency */
@@ -8821,8 +8936,8 @@ static int luna_dsa_keygen_ex(DSA *dsa, int flagSessionObject) {
    EVP_PKEY *pkey = NULL;
    /*CK_BBOOL bFalse = 0;*/
    CK_BBOOL bTrue = CK_TRUE;
-   CK_BBOOL bModifiable = CK_TRUE;
-   CK_BBOOL bExtractable = CK_TRUE;
+   CK_BBOOL bModifiable = CK_FALSE;
+   CK_BBOOL bExtractable = CK_FALSE;
    CK_BBOOL bTokenObject = (flagSessionObject ? CK_FALSE : CK_TRUE);
 
    CK_OBJECT_HANDLE priv_handle = LUNA_INVALID_HANDLE;
@@ -8891,10 +9006,20 @@ static int luna_dsa_keygen_ex(DSA *dsa, int flagSessionObject) {
       goto err;
    }
 
-   luna_strncpy(bufLabelPublic, "dsa-public-", sizeof(bufLabelPublic));
-   (void)luna_sprintf_hex(&bufLabelPublic[11], bufId, sizeof(bufId));
-   luna_strncpy(bufLabelPrivate, "dsa-private-", sizeof(bufLabelPrivate));
-   (void)luna_sprintf_hex(&bufLabelPrivate[12], bufId, sizeof(bufId));
+   char envLabel[sizeof(bufLabelPrivate)];
+   if (luna_runtime_get_label(envLabel, sizeof(envLabel))) {
+	  luna_strncpy(bufLabelPrivate, envLabel, sizeof(bufLabelPrivate));
+	  luna_strncpy(bufLabelPublic, envLabel, sizeof(bufLabelPublic));
+
+	  if (strlen(bufLabelPublic) + 4 < sizeof(bufLabelPublic)) {
+		 strcat(bufLabelPublic, "-pub");
+	  }
+   } else {
+	   luna_strncpy(bufLabelPublic, "dsa-public-", sizeof(bufLabelPublic));
+	   (void)luna_sprintf_hex(&bufLabelPublic[11], bufId, sizeof(bufId));
+	   luna_strncpy(bufLabelPrivate, "dsa-private-", sizeof(bufLabelPrivate));
+	   (void)luna_sprintf_hex(&bufLabelPrivate[12], bufId, sizeof(bufId));
+   }
 
    /* NOTE: the input parameters including keysize are mandatory */
 
@@ -8975,6 +9100,14 @@ static int luna_dsa_keygen_ex(DSA *dsa, int flagSessionObject) {
       LUNA_ERRORLOGL(LUNA_FUNC_NAME ": C_GenerateKeyPair", retCode);
       goto err;
    }
+   
+   retCode = luna_pka_post_keygen(ctx.hSession, priv_handle);
+   if (retCode != CKR_OK) {
+	  LUNACA3err(LUNACA3_F_DSA_KEYGEN, LUNACA3_R_EPKCS11);
+	  ERR_add_error_data(2, "CA_SetAuthorizationData=0x", luna_itoa(itoabuf, retCode));
+	  LUNA_ERRORLOGL(LUNA_FUNC_NAME ": CA_SetAuthorizationData", retCode);
+	  goto err;
+   }     
 
    pkey = luna_load_dsa(NULL, &ctx, pub_handle, CKO_PUBLIC_KEY, 0);
    if (pkey == NULL) {
@@ -10344,8 +10477,8 @@ static int luna_ec_keygen_hw_ex(EC_KEY *dsa, int flagSessionObject, int flagDeri
    CK_BBOOL bTrue = 1;
    CK_BBOOL bTokenObject = (flagSessionObject ? 0 : 1);
    CK_BBOOL bDerive = (flagDerive ? 1 : 0);
-   CK_BBOOL bModifiable = CK_TRUE;
-   CK_BBOOL bExtractable = CK_TRUE;
+   CK_BBOOL bModifiable = CK_FALSE;
+   CK_BBOOL bExtractable = CK_FALSE;
 
    CK_OBJECT_HANDLE priv_handle = LUNA_INVALID_HANDLE;
    CK_OBJECT_HANDLE pub_handle = LUNA_INVALID_HANDLE;
@@ -10416,10 +10549,20 @@ static int luna_ec_keygen_hw_ex(EC_KEY *dsa, int flagSessionObject, int flagDeri
 
        bufIdLen = sizeof(bufId);
 
-       luna_strncpy(bufLabelPublic, "ecdsa-public-", sizeof(bufLabelPublic));
-       (void)luna_sprintf_hex(&bufLabelPublic[13], bufId, bufIdLen);
-       luna_strncpy(bufLabelPrivate, "ecdsa-private-", sizeof(bufLabelPrivate));
-       (void)luna_sprintf_hex(&bufLabelPrivate[14], bufId, bufIdLen);
+	   char envLabel[sizeof(bufLabelPrivate)];
+       if (luna_runtime_get_label(envLabel, sizeof(envLabel))) {
+          luna_strncpy(bufLabelPrivate, envLabel, sizeof(bufLabelPrivate));
+          luna_strncpy(bufLabelPublic, envLabel, sizeof(bufLabelPublic));
+
+          if (strlen(bufLabelPublic) + 4 < sizeof(bufLabelPublic)) {
+             strcat(bufLabelPublic, "-pub");
+          }
+       } else {
+          luna_strncpy(bufLabelPublic, "ecdsa-public-", sizeof(bufLabelPublic));
+          (void)luna_sprintf_hex(&bufLabelPublic[13], bufId, bufIdLen);
+          luna_strncpy(bufLabelPrivate, "ecdsa-private-", sizeof(bufLabelPrivate));
+          (void)luna_sprintf_hex(&bufLabelPrivate[14], bufId, bufIdLen);
+	   }
 
    } else {
        /* use minimal-sized CKA_ID, CKA_LABEL */
@@ -10488,6 +10631,14 @@ static int luna_ec_keygen_hw_ex(EC_KEY *dsa, int flagSessionObject, int flagDeri
       ERR_add_error_data(2, "C_GenerateKeyPair=0x", luna_itoa(itoabuf, retCode));
       LUNA_ERRORLOGL(LUNA_FUNC_NAME ": C_GenerateKeyPair", retCode);
       goto err;
+   }
+   
+   retCode = luna_pka_post_keygen(ctx.hSession, priv_handle);
+   if (retCode != CKR_OK) {
+	  LUNACA3err(LUNACA3_F_EC_GENERATE_KEY, LUNACA3_R_EPKCS11);
+	  ERR_add_error_data(2, "CA_SetAuthorizationData=0x", luna_itoa(itoabuf, retCode));
+	  LUNA_ERRORLOGL(LUNA_FUNC_NAME ": CA_SetAuthorizationData", retCode);
+	  goto err;
    }
 
    pkey = luna_load_ecdsa_FAST(NULL, &ctx, pub_handle, priv_handle, 0);
@@ -10632,6 +10783,246 @@ static char *luna_strncpy(char *dest, const char *src, size_t n) {
         strncpy(dest, src, (n - 1));
     dest[n - 1] = 0;
     return dest;
+}
+
+static int luna_get_env_value(const char *env_name, char *buf, size_t buflen)
+{
+    const char *v;
+    size_t n;
+
+    if (env_name == NULL || buf == NULL || buflen == 0)
+        return 0;
+
+    v = getenv(env_name);
+    if (v == NULL || *v == '\0')
+        return 0;
+
+    n = strlen(v);
+    if (n >= buflen)
+        return 0;
+
+    memcpy(buf, v, n);
+    buf[n] = '\0';
+    return 1;
+}
+
+static int luna_prompt_hidden(const char *prompt, char *buf, size_t buflen, CK_ULONG *outlen)
+{
+    size_t n = 0;
+
+    if (outlen != NULL)
+        *outlen = 0;
+
+    if (buf == NULL || buflen < 2)
+        return 0;
+
+    memset(buf, 0, buflen);
+
+#ifdef LUNA_OSSL_WINDOWS
+    {
+        int ch = 0;
+        fputs(prompt != NULL ? prompt : "Enter password: ", stderr);
+        fflush(stderr);
+
+        while ((ch = _getch()) != '\r' && ch != '\n') {
+            if (ch == 3) { /* Ctrl-C */
+                fputs("^C\n", stderr);
+                return 0;
+            }
+            if ((ch == '\b' || ch == 127)) {
+                if (n > 0) {
+                    n--;
+                    buf[n] = '\0';
+                }
+                continue;
+            }
+            if (n + 1 < buflen) {
+                buf[n++] = (char)ch;
+                buf[n] = '\0';
+            }
+        }
+        fputc('\n', stderr);
+    }
+#else
+    {
+        struct termios oldt, newt;
+        int ch = 0;
+
+        if (tcgetattr(STDIN_FILENO, &oldt) != 0)
+            return 0;
+
+        newt = oldt;
+        newt.c_lflag &= ~(ECHO);
+        if (tcsetattr(STDIN_FILENO, TCSANOW, &newt) != 0)
+            return 0;
+
+        fputs(prompt != NULL ? prompt : "Enter password: ", stderr);
+        fflush(stderr);
+
+        while ((ch = getchar()) != '\n' && ch != EOF) {
+            if (n + 1 < buflen) {
+                buf[n++] = (char)ch;
+                buf[n] = '\0';
+            }
+        }
+
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+        fputc('\n', stderr);
+    }
+#endif
+
+    if (n == 0)
+        return 0;
+
+    if (outlen != NULL)
+        *outlen = (CK_ULONG)n;
+
+    return 1;
+}
+
+static luna_runtime_opts_t g_luna_runtime_opts = {0, 0, {0}, {0}};
+
+static void luna_runtime_opts_clear(void)
+{
+    OPENSSL_cleanse(g_luna_runtime_opts.auth, sizeof(g_luna_runtime_opts.auth));
+    memset(g_luna_runtime_opts.label, 0, sizeof(g_luna_runtime_opts.label));
+    g_luna_runtime_opts.assign = 0;
+    g_luna_runtime_opts.active = 0;
+}
+
+static int luna_runtime_opts_set(const char *label, const char *auth, int assign)
+{
+    luna_runtime_opts_clear();
+
+    if (label != NULL && label[0] != '\0') {
+        luna_strncpy(g_luna_runtime_opts.label, label, sizeof(g_luna_runtime_opts.label));
+        g_luna_runtime_opts.active = 1;
+    }
+
+    if (auth != NULL && auth[0] != '\0') {
+        luna_strncpy(g_luna_runtime_opts.auth, auth, sizeof(g_luna_runtime_opts.auth));
+        g_luna_runtime_opts.active = 1;
+    }
+
+    if (assign) {
+        g_luna_runtime_opts.assign = 1;
+        g_luna_runtime_opts.active = 1;
+    }
+
+    return 1;
+}
+
+static int luna_runtime_get_label(char *buf, size_t buflen)
+{
+    if (buf == NULL || buflen < 2)
+        return 0;
+    if (!g_luna_runtime_opts.active || g_luna_runtime_opts.label[0] == '\0')
+        return 0;
+
+    luna_strncpy(buf, g_luna_runtime_opts.label, buflen);
+    return 1;
+}
+
+static int luna_pka_get_pass(char *buf, size_t buflen, CK_ULONG *outlen)
+{
+    const char *auth = g_luna_runtime_opts.auth;
+    size_t n = 0;
+
+    if (outlen != NULL)
+        *outlen = 0;
+
+    if (buf == NULL || buflen < 2)
+        return 0;
+    if (!g_luna_runtime_opts.active || auth[0] == '\0')
+        return 0;
+
+    if (strcmp(auth, "prompt") == 0) {
+        return luna_prompt_hidden("Enter Luna key authorization password: ",
+                                  buf, buflen, outlen);
+    }
+
+    if (strncmp(auth, "passenv:", 8) == 0) {
+        if (luna_get_env_value(auth + 8, buf, buflen)) {
+            n = strlen(buf);
+            if (outlen != NULL)
+                *outlen = (CK_ULONG)n;
+            return 1;
+        }
+        return 0;
+    }
+
+    if (strncmp(auth, "password:", 9) == 0) {
+        luna_strncpy(buf, auth + 9, buflen);
+        n = strlen(buf);
+        if (outlen != NULL)
+            *outlen = (CK_ULONG)n;
+        return (n > 0);
+    }
+
+    if (strcmp(auth, "none") == 0)
+        return 0;
+
+    return 0;
+}
+
+static CK_RV luna_pka_post_keygen(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hPriv)
+{
+    CK_RV rv = CKR_OK;
+    char passbuf[256];
+    CK_ULONG passlen = 0;
+    int use_assign = g_luna_runtime_opts.active && g_luna_runtime_opts.assign;
+
+    memset(passbuf, 0, sizeof(passbuf));
+
+    if ((!g_luna_runtime_opts.active || g_luna_runtime_opts.auth[0] == '\0') && !use_assign)
+        return CKR_OK;
+
+    /* AssignKey without pass makes no sense in your model */
+    if (!luna_pka_get_pass(passbuf, sizeof(passbuf), &passlen))
+        return CKR_ARGUMENTS_BAD;
+
+    rv = p11.ext.CA_SetAuthorizationData(
+            hSession,
+            hPriv,
+            NULL, 0,
+            (CK_UTF8CHAR_PTR)passbuf, passlen);
+
+    OPENSSL_cleanse(passbuf, sizeof(passbuf));
+
+    if (rv != CKR_OK)
+        return rv;
+
+    if (use_assign) {
+        rv = p11.ext.CA_AssignKey(hSession, hPriv);
+        if (rv != CKR_OK)
+            return rv;
+    }
+
+    return CKR_OK;
+}
+
+static CK_RV luna_pka_authorize_for_sign(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hPriv)
+{
+    CK_RV rv = CKR_OK;
+    char passbuf[256];
+    CK_ULONG passlen = 0;
+
+    memset(passbuf, 0, sizeof(passbuf));
+
+    if (!g_luna_runtime_opts.active || g_luna_runtime_opts.auth[0] == '\0')
+        return CKR_OK;
+
+    if (!luna_pka_get_pass(passbuf, sizeof(passbuf), &passlen))
+        return CKR_ARGUMENTS_BAD;
+
+    rv = p11.ext.CA_AuthorizeKey(
+            hSession,
+            hPriv,
+            (CK_UTF8CHAR_PTR)passbuf,
+            passlen);
+
+    OPENSSL_cleanse(passbuf, sizeof(passbuf));
+    return rv;
 }
 
 #if defined(LUNA_OSSL_METH_SET_CHECK_KEYPAIR) || defined(LUNA_OSSL_ASN1_SET_CHECK_KEYPAIR)

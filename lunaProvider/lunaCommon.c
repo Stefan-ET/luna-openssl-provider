@@ -468,6 +468,16 @@ int luna_prov_EC_KEY_generate_key_ex(EC_KEY *key, int lunaflags)
     return luna_ec_keygen_hw_ex(key, flagSessionObject, flagDerive);
 }
 
+int luna_prov_runtime_set(const char *label, const char *auth, int assign)
+{
+    return luna_runtime_opts_set(label, auth, assign);
+}
+
+void luna_prov_runtime_clear(void)
+{
+    luna_runtime_opts_clear();
+}
+
 int luna_prov_ECDSA_sign_ex(int type, const unsigned char *dgst, int dlen,
                   unsigned char *sig, unsigned int *siglen, const BIGNUM *kinv,
                   const BIGNUM *r, EC_KEY *eckey)
@@ -488,8 +498,9 @@ int luna_prov_DSA_generate_key(DSA *dsa)
 {
     LUNA_PRINTF(("\n"));
     /* for keygen, the engine does not redirect to software so we must redirect here */
-    if ( ! luna_get_enable_dsa_gen_key_pair() )
+    if ( ! luna_get_enable_dsa_gen_key_pair() ) {
         return DSA_generate_key(dsa);
+    }
     int flagSessionObject = luna_get_token_object() ? 0 : 1;
     return luna_dsa_keygen_ex(dsa, flagSessionObject);
 }
