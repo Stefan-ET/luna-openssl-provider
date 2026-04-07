@@ -57,6 +57,7 @@ extern "C" {
 #define CKU_SO 0
 #define CKU_USER 1
 #define CKU_LIMITED_USER 0x80000001
+#define CKU_LIMITED_CRYPTO_OFFICER 0x80000003
 /* deprecated: #define CKU_LIMITED_USER_OLD 0x08000001 */
 
 /* Mechanism types */
@@ -144,6 +145,8 @@ extern "C" {
 
 #define CKA_VENDOR_DEFINED 0x80000000
 #define CKA_FINGERPRINT_SHA1 (CKA_VENDOR_DEFINED | 0x0002)
+#define CKA_AUTH_DATA 0x80001005
+#define CKA_ASSIGNED 0x80001006
 
 /* Key types */
 #define CKK_RSA 0x00000000

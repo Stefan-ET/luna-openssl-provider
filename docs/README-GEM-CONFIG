@@ -69,8 +69,13 @@ OPTIONAL:
   EnableLoadPubKey......0........set to 1 for apps that must call "ENGINE_load_public_key" (e.g., BIND).
   
   EnableRsaGenKeyPair...0........set to 1 for apps that must call "RSA_generate_key" (e.g., BIND).
+  EnableEcGenKeyPair....0........set to 1 for apps that must call EC key generation in hardware.
   EnableDsaGenKeyPair...0........set to 1 for apps that must call "DSA_generate_key" (e.g., BIND).
 
+NOTE: for provider-based EC / RSA / DSA key generation with runtime options
+        such as luna-key-label, luna-key-auth, and luna-key-assign, the
+        corresponding hardware key generation path must be enabled.  
+  
   EnableLoginInit.......0........set to 1 for login via engine (i.e., instead of login via "sautil").
 
   Appliance.............Luna.....set to KeySecure to work in KeySecure mode.
@@ -99,7 +104,10 @@ NEW (as of OpenSSL v1.1.0)
 
   EnableLimitedUser.....0........Set to 1 for login as Crypto-User (default is Crypto-Officer).
                                  Note there is a corresponding change in sautil; i.e., "sautil -u ...".
-
+  EnableLimitedCryptoOfficer.0...Set to 1 for login as Limited Crypto-Officer (LCO).
+                                 This is useful when key generation or signing must be performed with LCO rights.
+                                 This setting controls the partition login role only.
+                                 Runtime key authorisation via luna-key-auth remains separate.								 
 DEPRECATED (as of OpenSSL v1.1.0)
 
   DisablePublicCrypto...1........As a result, public key crypto in software always.

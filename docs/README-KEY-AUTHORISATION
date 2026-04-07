@@ -47,30 +47,34 @@ OVERVIEW
 WHAT CHANGED
 ============
 
-  1. Key generation can now receive the key label, key authorisation mode,
-     and key assign flag through provider keygen parameters instead of using
-     dedicated environment toggles.
+  1. Key generation now accepts the following runtime options through provider
+     keygen parameters:
 
-  2. Signing / key loading can now receive authorisation information through
-     the pkcs11 URI using the luna-auth component.
+       - luna-key-label
+       - luna-key-auth
+       - luna-key-assign
 
-  3. RSA key generation was updated so the generated public key metadata is
-     propagated correctly for HSM-backed usage.
+  2. The key authorisation value is now applied directly in the private-key
+     generation template when luna-key-auth is provided.
 
-  4. DSA key generation was updated so:
+     This applies to RSA, EC / ECDSA, and DSA key generation.
 
-       - provider runtime options are handed down to the low-level HSM path;
-       - missing domain parameters are generated when required;
-       - EnableDsaGenKeyPair is honored for HSM-backed key generation.
+  3. The luna-key-assign option controls whether the generated private key is
+     created with CKA_ASSIGNED=TRUE.
 
-  5. The password handling model is now centered on the runtime auth string.
-     The special env-based form that remains supported is:
+     It does not call CA_AssignKey() after generation.
 
+  4. The signing / key loading path accepts runtime authorisation through the
+     pkcs11 URI form:
+
+       pkcs11:CKA_LABEL=<label>;luna-auth=<auth-mode>
+
+  5. The supported authorisation modes are:
+
+       prompt
+       password:<plaintext>
        passenv:<ENVVAR>
-
-     This means that the environment variable is used only as the source for
-     the password value, not as a separate legacy control mechanism.
-
+       none
 
 PREREQUISITES
 =============
@@ -110,6 +114,17 @@ PREREQUISITES
   5. Use meaningful labels.  In all examples below, labels are intentionally
      longer than very short test names.
 
+  6. If the workflow must run under Limited Crypto-Officer (LCO), set:
+
+       EnableLimitedCryptoOfficer=1
+
+     in GemEngine configuration.
+
+     This controls the partition login role.
+     It is independent from the runtime key authorisation option:
+
+       luna-key-auth	 
+
 
 KEY AUTHORISATION OPTIONS
 =========================
@@ -123,7 +138,7 @@ KEY AUTHORISATION OPTIONS
   luna-key-auth       password:12345678                Use inline plaintext auth data
   luna-key-auth       passenv:MY_LUNA_PASS             Read auth data from environment variable
   luna-key-auth       none                             Do not apply key auth data
-  luna-key-assign     1                                Call key-assign after key generation
+  luna-key-assign     1                                Generate the private key with CKA_ASSIGNED=TRUE
 
 
   TABLE 2. SIGN / LOAD URI OPTIONS
@@ -150,15 +165,49 @@ GENERAL RULES
 
        -inkey "pkcs11:CKA_LABEL=<label>;luna-auth=<mode>"
 
-  3. The assign option applies to KEYGEN only.
+  3. If luna-key-auth is provided, the provider passes the authorisation data
+     into the private-key template during key generation using CKA_AUTH_DATA.
 
-  4. The password:<value> form is useful for quick testing, but it exposes
-     the secret in command history and process listings.
+  4. If luna-key-assign:1 is provided, the provider also sets CKA_ASSIGNED=TRUE
+     in the private-key template.
 
-  5. The passenv:<ENVVAR> form is recommended for scripted use.
+  5. If luna-key-auth is not provided, no key authorisation data is applied
+     during key generation.
 
-  6. The prompt form is recommended for interactive use.
+  6. The assign option applies to KEYGEN only.  It affects the generated key
+     template and does not trigger CA_AssignKey() after generation.
 
+  7. The password:<value> form is useful for quick testing, but it exposes the
+     secret in command history and process listings.
+
+  8. The passenv:<ENVVAR> form is recommended for scripted use.
+
+  9. The prompt form is recommended for interactive use.
+
+ 10. EnableLimitedCryptoOfficer and luna-key-auth apply to different layers:
+
+       - EnableLimitedCryptoOfficer selects the partition login role
+       - luna-key-auth provides per-key authorisation data  
+  
+KEYGEN BEHAVIOUR MATRIX
+======================
+
+  1. luna-key-auth + luna-key-assign:1
+
+     The generated private key carries:
+       - CKA_AUTH_DATA
+       - CKA_ASSIGNED=TRUE
+
+  2. luna-key-auth only
+
+     The generated private key carries:
+       - CKA_AUTH_DATA
+       - no CKA_ASSIGNED flag change
+
+  3. no luna-key-auth and no luna-key-assign
+
+     Standard private-key generation without runtime key authorisation data
+     and without assigned-key generation.
 
 EXAMPLES
 ========
