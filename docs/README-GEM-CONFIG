@@ -113,7 +113,14 @@ DEPRECATED (as of OpenSSL v1.1.0)
   DisablePublicCrypto...1........As a result, public key crypto in software always.
   EnableRsaSignVerify...0........As a result, RSA_sign redirects to RSA_private_encrypt always.
 
-
+NEW	EngineInit may also use:
+	passenv=<ENVVAR>
+	
+	Example:
+	EngineInit="HSMlabel":0:0:passenv=LCO_PASSWORD
+	
+	This reads the password from the named environment variable in the current
+	process environment.
 
 EXAMPLES
 ========
@@ -193,6 +200,8 @@ EXAMPLE 4a. login via engine (interactive login via console).
   
   NOTE: the token label must appear within double-quotation marks.
   NOTE: the appID 0:0 is a special case; it means do NOT call CA_SetApplicationID.
+  NOTE: The password source for EngineInit / Engine2Init may be password=, passfile=,
+	    passenv=, or passdev=console.
 
 
 
